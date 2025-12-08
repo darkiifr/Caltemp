@@ -177,7 +177,6 @@ jobs:
           script: |
             const fs = require('fs');
             const path = require('path');
-            const exec = require('@actions/exec');
             
             const tagName = process.env.TAG_NAME;
             const { owner, repo } = context.repo;
