@@ -13,12 +13,22 @@
     "windows": [
       {
         "title": "caltemp",
-        "width": 800,
-        "height": 600
+        "width": 1050,
+        "height": 750,
+        "transparent": true,
+        "decorations": false
       }
     ],
     "security": {
       "csp": null
+    }
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/darkiifr/Caltemp/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDNDRkE2MTkzRjkzNTQyQTMKUldTalFqWDVrMkg2UENyemtJOWZYNnFrY1JXemNMak54dllFNjJUM0JOOG1QYkZudllJZlphMHAK"
     }
   },
   "bundle": {

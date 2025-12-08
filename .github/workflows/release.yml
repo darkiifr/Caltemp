@@ -1,0 +1,357 @@
+name: Release
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      bump_type:
+        description: 'Type of version bump'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+        - patch
+        - minor
+        - major
+
+jobs:
+  bump-version:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      new_tag: ${{ steps.get_version.outputs.new_tag }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Bump Version
+        run: node scripts/bump-version.mjs --type=${{ github.event.inputs.bump_type }}
+
+      - name: Get New Version
+        id: get_version
+        run: |
+          NEW_VERSION=$(node -p "require('./package.json').version")
+          echo "new_tag=v.$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "NEW_VERSION=$NEW_VERSION" >> $GITHUB_ENV
+
+      - name: Commit and Push
+        run: |
+          git add package.json src-tauri/tauri.conf.json
+          git commit -m "chore(release): $NEW_VERSION"
+          git push origin main
+          git tag v.$NEW_VERSION
+          git push origin v.$NEW_VERSION
+
+  release:
+    needs: bump-version
+    if: always() && (needs.bump-version.result == 'success' || needs.bump-version.result == 'skipped')
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: "--target universal-apple-darwin"
+            rust_targets: "aarch64-apple-darwin,x86_64-apple-darwin"
+          - platform: ubuntu-22.04
+            args: ""
+            rust_targets: ""
+          - platform: windows-latest
+            args: ""
+            rust_targets: ""
+          - platform: windows-latest
+            args: "--target aarch64-pc-windows-msvc"
+            rust_targets: "aarch64-pc-windows-msvc"
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.bump-version.outputs.new_tag || github.ref_name }}
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Sync Version (if tag push)
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          if [[ $TAG_NAME =~ ^v[0-9]+\.[0-9]+\.[0-9]+.*$ ]]; then
+            VERSION=${TAG_NAME#v}
+            echo "Syncing version to $VERSION"
+            # Update package.json
+            node -e "
+              const fs = require('fs');
+              const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+              pkg.version = '$VERSION';
+              fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2));
+            "
+            # Update tauri.conf.json
+            node -e "
+              const fs = require('fs');
+              const tauriConf = JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json', 'utf8'));
+              tauriConf.version = '$VERSION';
+              fs.writeFileSync('src-tauri/tauri.conf.json', JSON.stringify(tauriConf, null, 2));
+            "
+            # Update public/version.json for runtime check
+            node -e "
+              const fs = require('fs');
+              const versionData = { version: '$VERSION' };
+              fs.writeFileSync('public/version.json', JSON.stringify(versionData, null, 2));
+            "
+          else
+            echo "Tag $TAG_NAME does not start with 'v', skipping version sync."
+          fi
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_targets }}
+
+      - name: Install dependencies (ubuntu only)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Install frontend dependencies
+        run: npm install
+
+      - name: Build the app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ needs.bump-version.outputs.new_tag || github.ref_name }}
+          releaseName: 'App v__VERSION__'
+          releaseBody: 'See the assets to download this version and install.'
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
+
+  generate-updater-json:
+    needs: [release, bump-version]
+    if: always() && (needs.release.result == 'success')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          
+      - name: Install dependencies
+        run: npm install
+
+      - name: Generate latest.json
+        uses: actions/github-script@v7
+        env:
+          TAG_NAME: ${{ needs.bump-version.outputs.new_tag || github.ref_name }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const exec = require('@actions/exec');
+            
+            const tagName = process.env.TAG_NAME;
+            const { owner, repo } = context.repo;
+
+            // Clean version string (remove 'v' prefix and potential leading dot)
+            const version = tagName.replace(/^v/, '').replace(/^\./, '');
+            console.log(`TagName: ${tagName} -> Cleaned Version: ${version}`);
+            
+            // Validate SemVer
+            if (!/^\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?$/.test(version)) {
+                core.setFailed(`Version ${version} is not valid SemVer`);
+                return;
+            }
+
+            console.log(`Fetching release for tag ${tagName} (Version: ${version})...`);
+            
+            try {
+                const release = await github.rest.repos.getReleaseByTag({ owner, repo, tag: tagName });
+                const assets = release.data.assets;
+                
+                console.log('📦 Assets found:', assets.map(a => a.name).join(', '));
+                
+                const platforms = {};
+                let signatureCount = 0;
+                
+                async function getSignature(assetName, assetUrl) {
+                  const sigName = assetName + '.sig';
+                  const sigAsset = assets.find(a => a.name === sigName);
+                  
+                  if (sigAsset) {
+                    console.log(`✅ Found existing signature for ${assetName}`);
+                    try {
+                        const download = await github.rest.repos.getReleaseAsset({
+                          owner,
+                          repo,
+                          asset_id: sigAsset.id,
+                          headers: { accept: 'application/octet-stream' }
+                        });
+                        return new TextDecoder().decode(download.data);
+                    } catch (e) {
+                        console.error(`Failed to download signature for ${assetName}:`, e);
+                        return null;
+                    }
+                  }
+                  
+                  console.log(`⚠️ Signature file not found for ${assetName}. Attempting to generate it...`);
+                  
+                  if (!process.env.TAURI_SIGNING_PRIVATE_KEY) {
+                      console.warn("❌ No private key available to sign.");
+                      return null;
+                  }
+
+                  try {
+                      // Download the asset
+                      console.log(`Downloading ${assetName}...`);
+                      const download = await github.rest.repos.getReleaseAsset({
+                          owner,
+                          repo,
+                          asset_id: assets.find(a => a.name === assetName).id,
+                          headers: { accept: 'application/octet-stream' }
+                      });
+                      fs.writeFileSync(assetName, Buffer.from(download.data));
+                      
+                      // Sign it
+                      console.log(`Signing ${assetName}...`);
+                      const env = {
+                          ...process.env,
+                          TAURI_PRIVATE_KEY: process.env.TAURI_SIGNING_PRIVATE_KEY,
+                          TAURI_PRIVATE_KEY_PASSWORD: process.env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+                      };
+                      
+                      // We need to install tauri cli to sign
+                      await exec.exec('npm', ['install', '@tauri-apps/cli']);
+                      await exec.exec('npx', ['tauri', 'signer', 'sign', assetName], { env });
+                      
+                      const sigNameGenerated = assetName + '.sig';
+                      if (fs.existsSync(sigNameGenerated)) {
+                          const sigContent = fs.readFileSync(sigNameGenerated, 'utf-8');
+                          
+                          // Upload the new signature
+                          console.log(`Uploading ${sigNameGenerated}...`);
+                          await github.rest.repos.uploadReleaseAsset({
+                              owner,
+                              repo,
+                              release_id: release.data.id,
+                              name: sigNameGenerated,
+                              data: fs.readFileSync(sigNameGenerated)
+                          });
+                          
+                          return sigContent;
+                      } else {
+                          console.error("Signer command finished but .sig file is missing.");
+                          return null;
+                      }
+                  } catch (e) {
+                      console.error(`Failed to generate signature for ${assetName}:`, e);
+                      return null;
+                  }
+                }
+
+                for (const asset of assets) {
+                  if (asset.name.endsWith('.sig') || asset.name === 'latest.json') continue;
+                  
+                  let platformKey = null;
+                  // Windows
+                  if (asset.name.endsWith('.exe') || asset.name.endsWith('.msi')) {
+                    if (asset.name.includes('aarch64')) platformKey = 'windows-aarch64';
+                    else platformKey = 'windows-x86_64';
+                  } 
+                  // Linux
+                  else if (asset.name.endsWith('.AppImage') || asset.name.endsWith('.deb')) {
+                    platformKey = 'linux-x86_64';
+                  } 
+                  // macOS
+                  else if (asset.name.endsWith('.app.tar.gz')) { 
+                     if (asset.name.includes('aarch64')) platformKey = 'darwin-aarch64';
+                     else if (asset.name.includes('x64')) platformKey = 'darwin-x86_64';
+                     else if (asset.name.includes('universal')) platformKey = 'darwin-universal';
+                  }
+                  
+                  if (platformKey) {
+                     console.log(`Processing asset ${asset.name} for platform ${platformKey}...`);
+                     const signature = await getSignature(asset.name, asset.browser_download_url);
+                     
+                     if (signature) {
+                        const entry = {
+                           signature: signature.trim(),
+                           url: asset.browser_download_url
+                        };
+                        
+                        if (platformKey === 'darwin-universal') {
+                            platforms['darwin-aarch64'] = entry;
+                            platforms['darwin-x86_64'] = entry;
+                        } else {
+                            platforms[platformKey] = entry;
+                        }
+                        signatureCount++;
+                     } else {
+                        console.warn(`❌ Skipping ${platformKey} because signature is missing.`);
+                     }
+                  }
+                }
+                
+                if (signatureCount === 0) {
+                    console.warn("⚠️ No signatures found for any platform. The updater will not work.");
+                }
+
+                const latestJson = {
+                  version: version,
+                  notes: release.data.body || `Update to version ${version}`,
+                  pub_date: release.data.published_at,
+                  platforms
+                };
+                
+                console.log('Generated latest.json content:', JSON.stringify(latestJson, null, 2));
+                fs.writeFileSync('latest.json', JSON.stringify(latestJson, null, 2));
+                
+                // Delete existing latest.json if it exists
+                const existingLatest = assets.find(a => a.name === 'latest.json');
+                if (existingLatest) {
+                   console.log('Deleting existing latest.json...');
+                   await github.rest.repos.deleteReleaseAsset({ owner, repo, asset_id: existingLatest.id });
+                }
+                
+                console.log('Uploading new latest.json...');
+                await github.rest.repos.uploadReleaseAsset({
+                  owner,
+                  repo,
+                  release_id: release.data.id,
+                  name: 'latest.json',
+                  data: fs.readFileSync('latest.json')
+                });
+                
+                console.log('✅ latest.json successfully uploaded!');
+            } catch (error) {
+                core.setFailed(`Action failed with error: ${error.message}`);
+            }
