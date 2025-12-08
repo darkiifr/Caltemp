@@ -55,7 +55,8 @@ function EventCountdown({ date }) {
     );
 }
 
-export default function DayDetails({ date, events, holiday, showNamedays }) {
+export default function DayDetails({ date, events, holiday, showNamedays, onEditEvent, onDeleteEvent }) {
+    const [contextMenu, setContextMenu] = useState(null);
     const nameDay = showNamedays ? getNameDay(date) : null;
     
     const formattedDate = date.toLocaleDateString('fr-FR', { 
@@ -68,8 +69,24 @@ export default function DayDetails({ date, events, holiday, showNamedays }) {
     // Sort events by time
     const sortedEvents = [...events].sort((a, b) => new Date(a.date) - new Date(b.date));
 
+    useEffect(() => {
+        const handleClick = () => setContextMenu(null);
+        window.addEventListener('click', handleClick);
+        return () => window.removeEventListener('click', handleClick);
+    }, []);
+
+    const handleContextMenu = (e, event) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setContextMenu({
+            x: e.clientX,
+            y: e.clientY,
+            event
+        });
+    };
+
     return (
-        <div className="w-80 bg-[#1e1e1e]/50 border-l border-white/5 flex flex-col h-full animate-in slide-in-from-right duration-300">
+        <div className="w-80 bg-[#1e1e1e]/50 border-l border-white/5 flex flex-col h-full animate-in slide-in-from-right duration-300 relative">
             <div className="p-6 border-b border-white/5">
                 <h3 className="text-xl font-bold text-white capitalize leading-tight">
                     {formattedDate}
@@ -103,7 +120,12 @@ export default function DayDetails({ date, events, holiday, showNamedays }) {
                     </div>
                 ) : (
                     sortedEvents.map(event => (
-                        <div key={event.id} className="bg-white/5 hover:bg-white/10 border border-white/5 rounded-xl p-4 transition-colors group">
+                        <div 
+                            key={event.id} 
+                            onContextMenu={(e) => handleContextMenu(e, event)}
+                            onClick={() => onEditEvent && onEditEvent(event)}
+                            className="bg-white/5 hover:bg-white/10 border border-white/5 rounded-xl p-4 transition-colors group cursor-pointer select-none"
+                        >
                             <div className="flex justify-between items-start mb-2">
                                 <h5 className="font-medium text-white truncate pr-2">{event.title}</h5>
                                 <span className="text-xs text-gray-400 whitespace-nowrap">
@@ -127,6 +149,27 @@ export default function DayDetails({ date, events, holiday, showNamedays }) {
                     ))
                 )}
             </div>
+
+            {/* Context Menu */}
+            {contextMenu && (
+                <div 
+                    style={{ top: contextMenu.y, left: contextMenu.x }} 
+                    className="fixed z-50 bg-[#252525] border border-white/10 rounded-lg shadow-xl py-1 min-w-[160px] animate-in fade-in zoom-in-95 duration-100"
+                >
+                    <button 
+                        onClick={() => onEditEvent && onEditEvent(contextMenu.event)}
+                        className="w-full text-left px-4 py-2 text-sm text-white hover:bg-white/10 transition-colors"
+                    >
+                        Modifier
+                    </button>
+                    <button 
+                        onClick={() => onDeleteEvent && onDeleteEvent(contextMenu.event.id)}
+                        className="w-full text-left px-4 py-2 text-sm text-red-400 hover:bg-red-500/10 transition-colors"
+                    >
+                        Supprimer
+                    </button>
+                </div>
+            )}
         </div>
     );
 }

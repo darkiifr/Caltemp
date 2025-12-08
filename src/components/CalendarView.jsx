@@ -10,7 +10,7 @@ const MONTHS = [
     'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'
 ];
 
-export default function CalendarView({ events, onAddEvent, onEditEvent, showHolidays = true, showNamedays = true }) {
+export default function CalendarView({ events, onAddEvent, onEditEvent, onDeleteEvent, showHolidays = true, showNamedays = true }) {
     const [currentDate, setCurrentDate] = useState(new Date());
     const [selectedDate, setSelectedDate] = useState(new Date());
     const [holidays, setHolidays] = useState([]);
@@ -206,7 +206,7 @@ export default function CalendarView({ events, onAddEvent, onEditEvent, showHoli
                                         e.stopPropagation();
                                         onAddEvent(new Date(currentDate.getFullYear(), currentDate.getMonth(), day));
                                     }}
-                                    className="absolute bottom-1 right-1 p-1 rounded-full bg-blue-500 text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-blue-600 z-10"
+                                    className="absolute top-1 right-1 p-1 rounded-full bg-blue-500 text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-blue-600 z-10"
                                 >
                                     <Plus size={12} />
                                 </button>
@@ -222,6 +222,8 @@ export default function CalendarView({ events, onAddEvent, onEditEvent, showHoli
                 events={selectedEvents} 
                 holiday={selectedHoliday}
                 showNamedays={showNamedays}
+                onEditEvent={onEditEvent}
+                onDeleteEvent={onDeleteEvent}
             />
         </div>
     );

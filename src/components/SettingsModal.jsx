@@ -30,7 +30,15 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave, onPre
     useEffect(() => {
         if (isOpen) {
             setLocalSettings({ ...settings, customModels: settings.customModels || [] });
-            getVersion().then(setAppVersion).catch(console.error);
+            getVersion()
+                .then(ver => {
+                    console.log('App version:', ver);
+                    setAppVersion(ver);
+                })
+                .catch(err => {
+                    console.error('Failed to get version:', err);
+                    setAppVersion('Unknown');
+                });
         }
     }, [isOpen, settings]);
 
@@ -69,7 +77,8 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave, onPre
         } catch (error) {
             console.error(error);
             setUpdateStatus('error');
-            await message(`Erreur lors de la vérification : ${error.message}`, { title: 'Erreur', kind: 'error' });
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            await message(`Erreur lors de la vérification : ${errorMessage}`, { title: 'Erreur', kind: 'error' });
         }
     };
 
@@ -201,14 +210,14 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave, onPre
                                     
                                     <div className="space-y-2">
                                         <label className="text-sm font-medium text-white">Style de la barre de titre</label>
-                                        <div className="grid grid-cols-3 gap-3">
-                                            {['macos', 'windows', 'none'].map(style => (
+                                        <div className="grid grid-cols-2 gap-3">
+                                            {['macos', 'windows'].map(style => (
                                                 <button
                                                     key={style}
                                                     onClick={() => handleChange('titlebarStyle', style)}
                                                     className={`p-3 rounded-xl border text-sm font-medium transition-all ${localSettings.titlebarStyle === style ? 'bg-blue-600 border-blue-500 text-white' : 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10'}`}
                                                 >
-                                                    {style === 'macos' ? 'MacOS' : style === 'windows' ? 'Windows' : 'Aucune'}
+                                                    {style === 'macos' ? 'MacOS' : 'Windows'}
                                                 </button>
                                             ))}
                                         </div>
@@ -361,9 +370,6 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave, onPre
                         {/* --- ABOUT --- */}
                         {activeTab === 'about' && (
                             <div className="text-center space-y-6 py-8">
-                                <div className="w-20 h-20 bg-gradient-to-br from-blue-500 to-purple-600 rounded-3xl mx-auto flex items-center justify-center shadow-2xl shadow-blue-900/20">
-                                    <span className="text-3xl font-bold text-white">C</span>
-                                </div>
                                 <div>
                                     <h2 className="text-2xl font-bold text-white">Caltemp</h2>
                                     <p className="text-gray-400">Version {appVersion}</p>

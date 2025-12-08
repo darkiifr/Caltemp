@@ -1,7 +1,6 @@
 import React from 'react';
 import { X, Minus, Square } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { exit } from '@tauri-apps/plugin-process';
 
 export default function Titlebar({ style = 'macos', osType }) {
     const appWindow = getCurrentWindow();
@@ -16,7 +15,7 @@ export default function Titlebar({ style = 'macos', osType }) {
 
     const handleClose = async (e) => {
         e.stopPropagation();
-        await appWindow.hide();
+        await appWindow.close();
     };
 
     const handleMinimize = async (e) => {
@@ -33,12 +32,10 @@ export default function Titlebar({ style = 'macos', osType }) {
     if (style === 'macos') {
         return (
             <div
-                className="h-10 w-full bg-[#1e1e1e]/90 backdrop-blur-md border-b border-white/5 flex items-center select-none transition-colors duration-300 px-4 justify-between relative"
+                data-tauri-drag-region
+                className="h-10 w-full bg-[#1e1e1e]/90 backdrop-blur-md border-b border-white/5 flex items-center select-none transition-colors duration-300 px-4 justify-between relative z-50 cursor-default"
             >
-                {/* Drag Region Layer */}
-                <div className="absolute inset-0 w-full h-full" data-tauri-drag-region />
-
-                <div className="flex gap-2.5 z-10 relative">
+                <div className="flex gap-2.5 relative z-50" onMouseDown={(e) => e.stopPropagation()}>
                     <button
                         onClick={handleClose}
                         className="w-3.5 h-3.5 rounded-full bg-[#FF5F57] hover:bg-[#FF4A42] border border-black/10 flex items-center justify-center transition-all active:scale-95 shadow-sm group cursor-default"
@@ -61,10 +58,10 @@ export default function Titlebar({ style = 'macos', osType }) {
                          <Square size={6} className="opacity-0 group-hover:opacity-100 text-black/50" />
                     </button>
                 </div>
-                <div className="text-xs font-medium text-white/30 pointer-events-none relative z-0">
+                <div className="text-xs font-medium text-white/30 pointer-events-none" data-tauri-drag-region>
                     {getTitle()}
                 </div>
-                <div className="w-16 relative z-0"></div>
+                <div className="w-16" data-tauri-drag-region></div>
             </div>
         );
     }
@@ -73,12 +70,13 @@ export default function Titlebar({ style = 'macos', osType }) {
     if (style === 'windows') {
         return (
             <div
-                className="h-8 w-full bg-[#1e1e1e]/80 backdrop-blur-md border-b border-white/10 flex items-center select-none transition-colors duration-300"
+                data-tauri-drag-region
+                className="h-8 w-full bg-[#1e1e1e]/80 backdrop-blur-md border-b border-white/10 flex items-center select-none transition-colors duration-300 relative z-50 cursor-default"
             >
-                <div className="flex-1 px-4" data-tauri-drag-region>
+                <div className="flex-1 px-4 pointer-events-none">
                     <div className="text-sm font-medium text-gray-300">{getTitle()}</div>
                 </div>
-                <div className="flex h-full">
+                <div className="flex h-full" onMouseDown={(e) => e.stopPropagation()}>
                     <button
                         onClick={handleMinimize}
                         className="w-12 h-full hover:bg-white/10 flex items-center justify-center transition-colors"

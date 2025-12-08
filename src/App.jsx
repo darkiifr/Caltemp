@@ -8,6 +8,7 @@ import EventModal from "./components/EventModal";
 import SettingsModal from "./components/SettingsModal";
 import Dexter from "./components/Dexter";
 import Titlebar from "./components/Titlebar";
+import ContextMenu from "./components/ContextMenu";
 import "./App.css";
 import { loadEvents, saveEvents, loadSettings, saveSettings } from "./services/fileManager";
 
@@ -19,6 +20,7 @@ function App() {
   const [selectedDate, setSelectedDate] = useState(null);
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [osType, setOsType] = useState('');
+  const [contextMenu, setContextMenu] = useState({ visible: false, x: 0, y: 0 });
   
   const [settings, setSettings] = useState({
     theme: 'dark',
@@ -90,7 +92,7 @@ function App() {
   useEffect(() => {
     const interval = setInterval(() => {
       const now = new Date();
-      events.forEach(event => {
+      const updatedEvents = events.map(event => {
         if (event.reminder && !event.notified) {
           const eventDate = new Date(event.date);
           const timeDiff = eventDate - now;
@@ -101,11 +103,17 @@ function App() {
                 title: 'Rappel Caltemp',
                 body: `Bientôt : ${event.title}`,
              });
-             // Mark as notified (in memory for now, ideally save to file)
-             // For simplicity, we don't save 'notified' state to disk here to avoid constant writes
+             return { ...event, notified: true };
           }
         }
+        return event;
       });
+
+      // Only update state if changes occurred to avoid infinite loops
+      if (JSON.stringify(updatedEvents) !== JSON.stringify(events)) {
+          setEvents(updatedEvents);
+          saveEvents(updatedEvents); // Persist notification state
+      }
     }, 60000);
     return () => clearInterval(interval);
   }, [events]);
@@ -132,10 +140,26 @@ function App() {
     }
   };
 
+  const handleDeleteEvent = async (eventId) => {
+    const updatedEvents = events.filter(e => e.id !== eventId);
+    setEvents(updatedEvents);
+    await saveEvents(updatedEvents);
+  };
+
+  const handleContextMenu = (e) => {
+    e.preventDefault();
+    setContextMenu({
+      visible: true,
+      x: e.clientX,
+      y: e.clientY
+    });
+  };
+
   return (
     <div 
+      onContextMenu={handleContextMenu}
       className={`h-screen w-screen flex flex-col text-white overflow-hidden border border-white/10 ${
-        currentSettings.windowEffect && currentSettings.windowEffect !== 'none' ? 'bg-transparent' : 'bg-[#121212]'
+        (!currentSettings.windowEffect || currentSettings.windowEffect !== 'none') ? 'bg-transparent' : 'bg-[#121212]'
       }`}
       style={{ fontSize: `${currentSettings.fontSize || 16}px` }}
     >
@@ -167,7 +191,7 @@ function App() {
 
         {/* Main Content */}
         <div className={`flex-1 relative ${
-            currentSettings.windowEffect && currentSettings.windowEffect !== 'none' 
+            (!currentSettings.windowEffect || currentSettings.windowEffect !== 'none')
             ? 'bg-transparent' 
             : 'bg-gradient-to-br from-[#121212] to-[#1a1a1a]'
         }`}>
@@ -180,6 +204,7 @@ function App() {
                     setSelectedEvent(event);
                     setIsEventModalOpen(true);
                 }}
+                onDeleteEvent={handleDeleteEvent}
             />
             
             {/* Dexter Panel (Overlay) */}
@@ -219,6 +244,14 @@ function App() {
             setPreviewSettings(null);
             await saveSettings(newSettings);
         }}
+      />
+
+      <ContextMenu
+        x={contextMenu.x}
+        y={contextMenu.y}
+        visible={contextMenu.visible}
+        onClose={() => setContextMenu({ ...contextMenu, visible: false })}
+        onSettings={() => setIsSettingsOpen(true)}
       />
     </div>
   );

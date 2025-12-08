@@ -16,8 +16,8 @@ fn set_window_effect(window: tauri::WebviewWindow, effect: &str) {
         let _ = clear_mica(&window);
 
         match effect {
-            "blur" => { let _ = apply_blur(&window, Some((18, 18, 18, 125))); },
-            "acrylic" => { let _ = apply_acrylic(&window, Some((18, 18, 18, 125))); },
+            "blur" => { let _ = apply_blur(&window, Some((18, 18, 18, 200))); },
+            "acrylic" => { let _ = apply_acrylic(&window, Some((18, 18, 18, 200))); },
             "mica" => { let _ = apply_mica(&window, None); },
             _ => {}
         }
@@ -67,8 +67,7 @@ pub fn run() {
                 .expect("Unsupported platform! 'apply_vibrancy' is only supported on macOS");
 
             #[cfg(target_os = "windows")]
-            apply_blur(&window, Some((18, 18, 18, 125)))
-                .expect("Unsupported platform! 'apply_blur' is only supported on Windows");
+            let _ = apply_mica(&window, None);
 
             let quit_i = MenuItem::with_id(app, "quit", "Quitter", true, None::<&str>)?;
             let show_i = MenuItem::with_id(app, "show", "Afficher", true, None::<&str>)?;
