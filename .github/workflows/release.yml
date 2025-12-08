@@ -46,7 +46,7 @@ jobs:
         id: get_version
         run: |
           NEW_VERSION=$(node -p "require('./package.json').version")
-          echo "new_tag=v.$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "new_tag=v$NEW_VERSION" >> $GITHUB_OUTPUT
           echo "NEW_VERSION=$NEW_VERSION" >> $GITHUB_ENV
 
       - name: Commit and Push
@@ -54,8 +54,8 @@ jobs:
           git add package.json src-tauri/tauri.conf.json
           git commit -m "chore(release): $NEW_VERSION"
           git push origin main
-          git tag v.$NEW_VERSION
-          git push origin v.$NEW_VERSION
+          git tag v$NEW_VERSION
+          git push origin v$NEW_VERSION
 
   release:
     needs: bump-version
@@ -96,8 +96,11 @@ jobs:
         shell: bash
         run: |
           TAG_NAME=${GITHUB_REF#refs/tags/}
-          if [[ $TAG_NAME =~ ^v[0-9]+\.[0-9]+\.[0-9]+.*$ ]]; then
+          # Match v1.0.0 or v.1.0.0
+          if [[ $TAG_NAME =~ ^v\.?[0-9]+\.[0-9]+\.[0-9]+.*$ ]]; then
+            # Remove 'v' or 'v.' prefix
             VERSION=${TAG_NAME#v}
+            VERSION=${VERSION#.}
             echo "Syncing version to $VERSION"
             # Update package.json
             node -e "
