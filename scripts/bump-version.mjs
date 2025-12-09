@@ -39,5 +39,10 @@ const tauriConf = JSON.parse(fs.readFileSync(tauriConfPath, 'utf-8'));
 tauriConf.version = newVersion;
 fs.writeFileSync(tauriConfPath, JSON.stringify(tauriConf, null, 2) + '\n');
 
+// Update public/version.json
+const versionJsonPath = path.resolve('public/version.json');
+const versionData = { version: newVersion };
+fs.writeFileSync(versionJsonPath, JSON.stringify(versionData, null, 2));
+
 console.log(`::set-output name=new_version::${newVersion}`);
 console.log(newVersion);

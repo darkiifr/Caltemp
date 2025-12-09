@@ -51,7 +51,7 @@ jobs:
 
       - name: Commit and Push
         run: |
-          git add package.json src-tauri/tauri.conf.json
+          git add package.json src-tauri/tauri.conf.json public/version.json
           git commit -m "chore(release): $NEW_VERSION"
           git push origin main
           git tag v$NEW_VERSION

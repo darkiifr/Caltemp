@@ -30,14 +30,25 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave, onPre
     useEffect(() => {
         if (isOpen) {
             setLocalSettings({ ...settings, customModels: settings.customModels || [] });
-            getVersion()
-                .then(ver => {
-                    console.log('App version:', ver);
-                    setAppVersion(ver);
+            
+            // Try to fetch version from version.json first (for accurate build version)
+            fetch('/version.json')
+                .then(res => res.json())
+                .then(data => {
+                    if (data.version) {
+                        setAppVersion(data.version);
+                    } else {
+                        throw new Error('No version in version.json');
+                    }
                 })
-                .catch(err => {
-                    console.error('Failed to get version:', err);
-                    setAppVersion('Unknown');
+                .catch(() => {
+                    // Fallback to Tauri API
+                    getVersion()
+                        .then(ver => setAppVersion(ver))
+                        .catch(err => {
+                            console.error('Failed to get version:', err);
+                            setAppVersion('Unknown');
+                        });
                 });
         }
     }, [isOpen, settings]);
