@@ -43,10 +43,7 @@
     ],
     "windows": {
       "nsis": {
-        "languages": ["fr-FR"],
-        "customLanguageFiles": {
-          "fr-FR": "lang/fr-FR.nlf"
-        }
+        "languages": ["French"]
       }
     }
   }
