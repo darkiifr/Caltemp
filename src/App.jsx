@@ -21,6 +21,7 @@ function App() {
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [osType, setOsType] = useState('');
   const [contextMenu, setContextMenu] = useState({ visible: false, x: 0, y: 0 });
+  const [isLoaded, setIsLoaded] = useState(false);
   
   const [settings, setSettings] = useState({
     theme: 'dark',
@@ -69,6 +70,7 @@ function App() {
 
         setEvents(loadedEvents || []);
         setSettings(finalSettings);
+        setIsLoaded(true);
         
         // Apply window effect on startup
         if (finalSettings.windowEffect) {
@@ -110,13 +112,13 @@ function App() {
       });
 
       // Only update state if changes occurred to avoid infinite loops
-      if (JSON.stringify(updatedEvents) !== JSON.stringify(events)) {
+      if (isLoaded && JSON.stringify(updatedEvents) !== JSON.stringify(events)) {
           setEvents(updatedEvents);
           saveEvents(updatedEvents); // Persist notification state
       }
     }, 60000);
     return () => clearInterval(interval);
-  }, [events]);
+  }, [events, isLoaded]);
 
   const handleAddEvent = (date) => {
     setSelectedDate(date);

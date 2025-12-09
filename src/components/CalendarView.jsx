@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
 import { getHolidays } from '../utils/holidays';
 import { getNameDay } from '../utils/namedays';
@@ -14,6 +14,16 @@ export default function CalendarView({ events, onAddEvent, onEditEvent, onDelete
     const [currentDate, setCurrentDate] = useState(new Date());
     const [selectedDate, setSelectedDate] = useState(new Date());
     const [holidays, setHolidays] = useState([]);
+    const [direction, setDirection] = useState('right');
+    const [isDateInputVisible, setIsDateInputVisible] = useState(false);
+    const [dateInputValue, setDateInputValue] = useState('');
+    const dateInputRef = useRef(null);
+
+    useEffect(() => {
+        if (isDateInputVisible && dateInputRef.current) {
+            dateInputRef.current.focus();
+        }
+    }, [isDateInputVisible]);
 
     useEffect(() => {
         if (showHolidays) {
@@ -34,10 +44,12 @@ export default function CalendarView({ events, onAddEvent, onEditEvent, onDelete
     const { days, firstDay } = getDaysInMonth(currentDate);
 
     const prevMonth = () => {
+        setDirection('left');
         setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1));
     };
 
     const nextMonth = () => {
+        setDirection('right');
         setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1));
     };
 
@@ -100,12 +112,34 @@ export default function CalendarView({ events, onAddEvent, onEditEvent, onDelete
 
     const { events: selectedEvents, holiday: selectedHoliday } = getSelectedDayDetails();
 
+    const handleDateSubmit = (e) => {
+        if (e.key === 'Enter') {
+            const parts = dateInputValue.split('/');
+            if (parts.length === 3) {
+                const day = parseInt(parts[0]);
+                const month = parseInt(parts[1]) - 1;
+                const year = parseInt(parts[2]);
+                
+                if (!isNaN(day) && !isNaN(month) && !isNaN(year)) {
+                    const newDate = new Date(year, month, day);
+                    setCurrentDate(newDate);
+                    setSelectedDate(newDate);
+                    setIsDateInputVisible(false);
+                    setDateInputValue('');
+                }
+            }
+        } else if (e.key === 'Escape') {
+            setIsDateInputVisible(false);
+            setDateInputValue('');
+        }
+    };
+
     return (
         <div className="flex h-full bg-transparent text-white overflow-hidden">
             <div className="flex-1 flex flex-col p-4 overflow-y-auto custom-scrollbar animate-in fade-in duration-500">
                 {/* Header */}
                 <div className="flex justify-between items-center mb-4 shrink-0">
-                    <div>
+                    <div key={currentDate.toString()} className={direction === 'right' ? 'animate-month-right' : 'animate-month-left'}>
                         <h2 className="text-2xl font-bold tracking-tight">
                             {MONTHS[currentDate.getMonth()]} <span className="text-white/50">{currentDate.getFullYear()}</span>
                         </h2>
@@ -117,16 +151,33 @@ export default function CalendarView({ events, onAddEvent, onEditEvent, onDelete
                         <button onClick={prevMonth} className="p-2 hover:bg-white/10 rounded-full transition-colors">
                             <ChevronLeft size={20} />
                         </button>
-                        <button 
-                            onClick={() => {
-                                const now = new Date();
-                                setCurrentDate(now);
-                                setSelectedDate(now);
-                            }} 
-                            className="px-4 py-2 text-sm font-medium bg-white/10 hover:bg-white/20 rounded-full transition-colors"
-                        >
-                            Aujourd'hui
-                        </button>
+                        {isDateInputVisible ? (
+                            <input
+                                ref={dateInputRef}
+                                type="text"
+                                value={dateInputValue}
+                                onChange={(e) => setDateInputValue(e.target.value)}
+                                onKeyDown={handleDateSubmit}
+                                onBlur={() => setIsDateInputVisible(false)}
+                                placeholder="JJ/MM/AAAA"
+                                className="px-4 py-2 text-sm font-medium bg-white/10 hover:bg-white/20 rounded-full transition-colors w-32 text-center outline-none border border-blue-500/50"
+                            />
+                        ) : (
+                            <button 
+                                onClick={(e) => {
+                                    if (e.detail === 2) {
+                                        setIsDateInputVisible(true);
+                                    } else {
+                                        const now = new Date();
+                                        setCurrentDate(now);
+                                        setSelectedDate(now);
+                                    }
+                                }} 
+                                className="px-4 py-2 text-sm font-medium bg-white/10 hover:bg-white/20 rounded-full transition-colors"
+                            >
+                                Aujourd'hui
+                            </button>
+                        )}
                         <button onClick={nextMonth} className="p-2 hover:bg-white/10 rounded-full transition-colors">
                             <ChevronRight size={20} />
                         </button>
@@ -142,7 +193,10 @@ export default function CalendarView({ events, onAddEvent, onEditEvent, onDelete
                     ))}
                 </div>
 
-                <div className="grid grid-cols-7 gap-2 flex-1 auto-rows-fr min-h-[400px]">
+                <div 
+                    key={currentDate.toString()}
+                    className={`grid grid-cols-7 gap-2 flex-1 auto-rows-fr min-h-[400px] ${direction === 'right' ? 'animate-month-right' : 'animate-month-left'}`}
+                >
                     {Array.from({ length: firstDay }).map((_, i) => (
                         <div key={`empty-${i}`} />
                     ))}

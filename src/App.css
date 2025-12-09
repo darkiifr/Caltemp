@@ -92,3 +92,38 @@ body {
 .animate-in.zoom-in-95 {
     animation: zoomIn 0.2s ease-out forwards;
 }
+
+/* Rich Calendar Transitions */
+@keyframes slideMonthRight {
+  0% {
+    opacity: 0;
+    transform: translateX(40px) scale(0.95);
+    filter: blur(8px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes slideMonthLeft {
+  0% {
+    opacity: 0;
+    transform: translateX(-40px) scale(0.95);
+    filter: blur(8px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+.animate-month-right {
+  animation: slideMonthRight 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+.animate-month-left {
+  animation: slideMonthLeft 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}

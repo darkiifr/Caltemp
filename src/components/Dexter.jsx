@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User, Sparkles, X, Trash2, Copy } from 'lucide-react';
+import { Send, Bot, User, Sparkles, X, Trash2 } from 'lucide-react';
 import { generateText } from '../services/ai';
 
 export default function Dexter({ isOpen, onClose, settings, onAddEvent }) {
@@ -10,6 +10,44 @@ export default function Dexter({ isOpen, onClose, settings, onAddEvent }) {
     const [isTyping, setIsTyping] = useState(false);
     const messagesEndRef = useRef(null);
     const inputRef = useRef(null);
+
+    // Dragging state
+    const [position, setPosition] = useState({ x: window.innerWidth - 420, y: 80 });
+    const [isDragging, setIsDragging] = useState(false);
+    const dragOffset = useRef({ x: 0, y: 0 });
+
+    const handleMouseDown = (e) => {
+        setIsDragging(true);
+        dragOffset.current = {
+            x: e.clientX - position.x,
+            y: e.clientY - position.y
+        };
+    };
+
+    useEffect(() => {
+        const handleMouseMove = (e) => {
+            if (isDragging) {
+                setPosition({
+                    x: e.clientX - dragOffset.current.x,
+                    y: e.clientY - dragOffset.current.y
+                });
+            }
+        };
+
+        const handleMouseUp = () => {
+            setIsDragging(false);
+        };
+
+        if (isDragging) {
+            window.addEventListener('mousemove', handleMouseMove);
+            window.addEventListener('mouseup', handleMouseUp);
+        }
+
+        return () => {
+            window.removeEventListener('mousemove', handleMouseMove);
+            window.removeEventListener('mouseup', handleMouseUp);
+        };
+    }, [isDragging]);
 
     useEffect(() => {
         if (isOpen && inputRef.current) {
@@ -22,16 +60,32 @@ export default function Dexter({ isOpen, onClose, settings, onAddEvent }) {
     }, [messages, isTyping]);
 
     const parseCommand = (text) => {
-        // Regex simple pour détecter un rappel : "Rappel [titre] à [heure]"
-        // Ex: "Rappel RDV dentiste à 14h30"
-        // Ex: "Rappel Sortir les poubelles à 19h"
-        const regex = /(?:rappel|événement|event|rdv)\s+(?:pour|le)?\s*(.+?)\s+(?:à|@)\s*(\d{1,2})(?:h|:)(\d{2})?/i;
+        // Regex améliorée pour détecter un rappel
+        // Supporte:
+        // - "Rappel [titre] à [heure]"
+        // - "Rappel [titre] [heure]h"
+        // - "Rappel [titre] [heure]:[minute]"
+        // - "Rappel [heure] [titre]"
+        const regex = /(?:rappel|événement|event|rdv)\s+(?:pour|le)?\s*(.*?)(?:\s+(?:à|@)\s*|\s+)(\d{1,2})(?:h|:)?(\d{2})?(?:\s+(.*))?/i;
         const match = text.match(regex);
 
         if (match) {
-            const title = match[1].trim();
+            const titlePart1 = match[1] ? match[1].trim() : '';
             const hour = parseInt(match[2]);
             const minute = match[3] ? parseInt(match[3]) : 0;
+            const titlePart2 = match[4] ? match[4].trim() : '';
+            
+            // Combine parts for title, prioritizing the text content
+            let title = titlePart1;
+            if (titlePart2) {
+                title = title ? `${title} ${titlePart2}` : titlePart2;
+            }
+            
+            // If title is empty (e.g. "Rappel 14h"), use a default
+            if (!title) title = "Rappel";
+
+            // Validation basique de l'heure
+            if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
 
             const date = new Date();
             date.setHours(hour, minute, 0, 0);
@@ -88,9 +142,29 @@ export default function Dexter({ isOpen, onClose, settings, onAddEvent }) {
                 }));
                 history.push({ role: 'user', content: userMsg.content });
 
+                const now = new Date();
                 const systemPrompt = {
                     role: "system",
-                    content: "Tu es Dexter, un assistant calendrier. Si l'utilisateur veut créer un événement mais que tu ne peux pas le faire directement, guide-le vers la syntaxe 'Rappel [titre] à [heure]'."
+                    content: `Tu es Dexter, un assistant calendrier intelligent et efficace. Nous sommes le ${now.toLocaleString('fr-FR')}.
+                    
+                    Tes capacités :
+                    1. Créer des événements et rappels.
+                    2. Répondre aux questions générales.
+
+                    IMPORTANT : Si l'utilisateur demande de créer un événement, un rappel ou un rendez-vous, tu DOIS répondre UNIQUEMENT avec un bloc JSON strict au format suivant (sans texte avant ni après) :
+                    \`\`\`json
+                    {
+                        "action": "create_event",
+                        "data": {
+                            "title": "Titre de l'événement",
+                            "date": "Date ISO 8601 complète (ex: 2023-12-25T14:00:00.000Z)",
+                            "description": "Description contextuelle",
+                            "reminder": true
+                        }
+                    }
+                    \`\`\`
+                    
+                    Pour tout autre message, réponds normalement en texte de manière concise et amicale.`
                 };
 
                 const response = await generateText({
@@ -98,6 +172,28 @@ export default function Dexter({ isOpen, onClose, settings, onAddEvent }) {
                     model: settings.aiModel,
                     messages: [systemPrompt, ...history]
                 });
+
+                // Check for JSON action
+                const jsonMatch = response.match(/```json\s*({[\s\S]*?})\s*```/) || response.match(/{[\s\S]*?}/);
+                
+                if (jsonMatch) {
+                    try {
+                        const action = JSON.parse(jsonMatch[1] || jsonMatch[0]);
+                        if (action.action === 'create_event' && action.data) {
+                            onAddEvent(action.data);
+                            const dateStr = new Date(action.data.date).toLocaleString('fr-FR', { weekday: 'long', hour: '2-digit', minute: '2-digit' });
+                            setMessages(prev => [...prev, { 
+                                id: Date.now() + 1, 
+                                role: 'assistant', 
+                                content: `✅ C'est fait ! J'ai ajouté "${action.data.title}" pour ${dateStr}.` 
+                            }]);
+                            setIsTyping(false);
+                            return;
+                        }
+                    } catch (e) {
+                        console.error("Failed to parse AI JSON:", e);
+                    }
+                }
 
                 setMessages(prev => [...prev, { 
                     id: Date.now() + 1, 
@@ -108,7 +204,7 @@ export default function Dexter({ isOpen, onClose, settings, onAddEvent }) {
                 setMessages(prev => [...prev, { 
                     id: Date.now() + 1, 
                     role: 'assistant', 
-                    content: `❌ Erreur IA : ${error.message}` 
+                    content: `❌ Erreur IA : ${error.message || String(error)}` 
                 }]);
             }
         } else {
@@ -140,50 +236,57 @@ export default function Dexter({ isOpen, onClose, settings, onAddEvent }) {
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-y-0 right-0 w-full sm:w-[400px] bg-[#1e1e1e] shadow-2xl border-l border-white/10 z-40 flex flex-col animate-in slide-in-from-right duration-300">
+        <div 
+            style={{ 
+                left: position.x, 
+                top: position.y,
+                height: '600px' 
+            }}
+            className="fixed w-full sm:w-[380px] bg-[#1e1e1e]/90 backdrop-blur-xl shadow-2xl border border-white/10 rounded-2xl z-40 flex flex-col animate-in slide-in-from-right duration-300 overflow-hidden"
+        >
             {/* Header */}
-            <div className="h-14 border-b border-white/5 flex items-center justify-between px-4 bg-[#252525]">
+            <div 
+                className="h-10 border-b border-white/5 flex items-center justify-between px-4 bg-white/5 cursor-move select-none"
+                onMouseDown={handleMouseDown}
+            >
                 <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center shadow-lg shadow-blue-900/20">
-                        <Bot className="w-5 h-5 text-white" />
-                    </div>
-                    <div>
-                        <h3 className="font-bold text-white text-sm">Dexter</h3>
-                    </div>
+                    <div className="w-12 h-1 bg-white/10 rounded-full mx-auto sm:hidden"></div>
                 </div>
                 <div className="flex items-center gap-1">
-                    <button onClick={clearHistory} className="p-2 text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors">
+                    <button onClick={clearHistory} className="p-1.5 text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors" title="Effacer l'historique">
                         <Trash2 className="w-4 h-4" />
                     </button>
-                    <button onClick={onClose} className="p-2 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors">
-                        <X className="w-5 h-5" />
+                    <button onClick={onClose} className="p-1.5 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors" title="Fermer">
+                        <X className="w-4 h-4" />
                     </button>
                 </div>
             </div>
 
             {/* Messages Area */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar bg-[#1e1e1e]">
+            <div className="flex-1 overflow-y-auto p-4 space-y-6 custom-scrollbar">
                 {messages.map((msg) => (
-                    <div key={msg.id} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${msg.role === 'user' ? 'bg-white/10' : 'bg-blue-600/20'}`}>
+                    <div key={msg.id} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''} animate-in fade-in slide-in-from-bottom-2 duration-300`}>
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 shadow-md ${msg.role === 'user' ? 'bg-white/10' : 'bg-linear-to-br from-blue-500/20 to-purple-500/20 border border-white/5'}`}>
                             {msg.role === 'user' ? <User className="w-4 h-4 text-gray-300" /> : <Bot className="w-4 h-4 text-blue-400" />}
                         </div>
-                        <div className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
-                            msg.role === 'user' ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-[#2a2a2a] text-gray-200 rounded-tl-none border border-white/5'
+                        <div className={`max-w-[85%] rounded-2xl px-5 py-3.5 text-sm leading-relaxed shadow-sm ${
+                            msg.role === 'user' 
+                                ? 'bg-blue-600 text-white rounded-tr-none shadow-blue-900/20' 
+                                : 'bg-[#2a2a2a]/80 backdrop-blur-sm text-gray-200 rounded-tl-none border border-white/5'
                         }`}>
                             {msg.content}
                         </div>
                     </div>
                 ))}
                 {isTyping && (
-                    <div className="flex gap-3">
-                        <div className="w-8 h-8 rounded-full bg-blue-600/20 flex items-center justify-center shrink-0">
+                    <div className="flex gap-3 animate-in fade-in duration-300">
+                        <div className="w-8 h-8 rounded-full bg-linear-to-br from-blue-500/20 to-purple-500/20 border border-white/5 flex items-center justify-center shrink-0">
                             <Bot className="w-4 h-4 text-blue-400" />
                         </div>
-                        <div className="bg-[#2a2a2a] rounded-2xl rounded-tl-none px-4 py-3 border border-white/5 flex items-center gap-1">
-                            <span className="w-1.5 h-1.5 bg-gray-500 rounded-full animate-bounce"></span>
-                            <span className="w-1.5 h-1.5 bg-gray-500 rounded-full animate-bounce delay-75"></span>
-                            <span className="w-1.5 h-1.5 bg-gray-500 rounded-full animate-bounce delay-150"></span>
+                        <div className="bg-[#2a2a2a]/80 backdrop-blur-sm rounded-2xl rounded-tl-none px-4 py-4 border border-white/5 flex items-center gap-1.5">
+                            <span className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce"></span>
+                            <span className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce delay-75"></span>
+                            <span className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce delay-150"></span>
                         </div>
                     </div>
                 )}
@@ -191,21 +294,21 @@ export default function Dexter({ isOpen, onClose, settings, onAddEvent }) {
             </div>
 
             {/* Input Area */}
-            <div className="p-4 bg-[#252525] border-t border-white/5">
-                <div className="relative">
+            <div className="p-4 bg-white/5 border-t border-white/5 backdrop-blur-md">
+                <div className="relative group">
                     <textarea
                         ref={inputRef}
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
                         onKeyDown={handleKeyDown}
                         placeholder="Ex: Rappel Dentiste à 14h..."
-                        className="w-full bg-black/20 text-white text-sm pl-4 pr-12 py-3 rounded-xl border border-white/10 outline-none focus:border-blue-500/50 focus:bg-black/30 transition-all resize-none custom-scrollbar"
+                        className="w-full bg-black/20 text-white text-sm pl-4 pr-12 py-3.5 rounded-xl border border-white/10 outline-none focus:border-blue-500/50 focus:bg-black/40 transition-all resize-none custom-scrollbar placeholder:text-white/20"
                         rows={1}
                     />
                     <button
                         onClick={handleSend}
                         disabled={!input.trim() || isTyping}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 text-white rounded-lg transition-colors shadow-lg"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:cursor-not-allowed text-white rounded-lg transition-all shadow-lg hover:shadow-blue-500/25 active:scale-95"
                     >
                         {isTyping ? <Sparkles className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                     </button>

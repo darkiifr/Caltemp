@@ -41,6 +41,11 @@ export async function generateText({ apiKey, model, messages, context }) {
 
     } catch (error) {
         console.error("AI Service Error:", error);
-        throw error;
+        // Ensure we always throw an Error object with a message
+        if (error instanceof Error) {
+            throw error;
+        } else {
+            throw new Error(typeof error === 'string' ? error : "Une erreur inconnue est survenue");
+        }
     }
 }

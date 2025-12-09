@@ -110,12 +110,22 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave, onPre
 
     const handleInstallUpdate = async () => {
         if (!availableUpdate) return;
+
+        // Save settings before updating to ensure persistence
+        try {
+            if (onSave) {
+                await onSave(localSettings);
+            }
+        } catch (err) {
+            console.error("Error saving settings before update:", err);
+        }
+        
         try {
             await availableUpdate.downloadAndInstall();
             await relaunch();
         } catch (error) {
-            console.error("Update failed:", error);
-            setUpdateStatus('error');
+            console.error('Update failed:', error);
+            await message('Échec de la mise à jour: ' + error.message, { title: 'Erreur', kind: 'error' });
         }
     };
 
