@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Clock, Calendar, Gift, AlertCircle } from 'lucide-react';
 import { getNameDay } from '../utils/namedays';
+import { playBubbleSound } from '../utils/sound';
 
 function EventCountdown({ date }) {
     const [timeLeft, setTimeLeft] = useState('');
@@ -24,7 +25,7 @@ function EventCountdown({ date }) {
             }
 
             setStatus('future');
-            
+
             const days = Math.floor(diff / (1000 * 60 * 60 * 24));
             const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
             const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
@@ -58,10 +59,10 @@ function EventCountdown({ date }) {
 export default function DayDetails({ date, events, holiday, showNamedays, onEditEvent, onDeleteEvent }) {
     const [contextMenu, setContextMenu] = useState(null);
     const nameDay = showNamedays ? getNameDay(date) : null;
-    
-    const formattedDate = date.toLocaleDateString('fr-FR', { 
-        weekday: 'long', 
-        day: 'numeric', 
+
+    const formattedDate = date.toLocaleDateString('fr-FR', {
+        weekday: 'long',
+        day: 'numeric',
         month: 'long',
         year: 'numeric'
     });
@@ -86,12 +87,12 @@ export default function DayDetails({ date, events, holiday, showNamedays, onEdit
     };
 
     return (
-        <div className="w-80 bg-[#1e1e1e]/50 border-l border-white/5 flex flex-col h-full animate-in slide-in-from-right duration-300 relative">
+        <div className="w-80 bg-[#1e1e1e]/30 backdrop-blur-xl border-l border-white/5 flex flex-col h-full animate-in slide-in-from-right duration-300 relative">
             <div className="p-6 border-b border-white/5">
                 <h3 className="text-xl font-bold text-white capitalize leading-tight">
                     {formattedDate}
                 </h3>
-                
+
                 <div className="mt-4 space-y-2">
                     {holiday && (
                         <div className="flex items-center gap-2 text-purple-300 bg-purple-500/10 px-3 py-2 rounded-xl border border-purple-500/20">
@@ -99,7 +100,7 @@ export default function DayDetails({ date, events, holiday, showNamedays, onEdit
                             <span className="font-medium">{holiday.name}</span>
                         </div>
                     )}
-                    
+
                     {nameDay && (
                         <div className="flex items-center gap-2 text-blue-300 bg-blue-500/10 px-3 py-2 rounded-xl border border-blue-500/20">
                             <Calendar size={16} />
@@ -113,17 +114,17 @@ export default function DayDetails({ date, events, holiday, showNamedays, onEdit
                 <h4 className="text-xs font-medium text-gray-400 uppercase tracking-wider px-2">
                     Événements ({events.length})
                 </h4>
-                
+
                 {sortedEvents.length === 0 ? (
                     <div className="text-center py-10 text-gray-500">
                         <p>Aucun événement</p>
                     </div>
                 ) : (
                     sortedEvents.map(event => (
-                        <div 
-                            key={event.id} 
+                        <div
+                            key={event.id}
                             onContextMenu={(e) => handleContextMenu(e, event)}
-                            onClick={() => onEditEvent && onEditEvent(event)}
+                            onClick={() => { playBubbleSound(); onEditEvent && onEditEvent(event); }}
                             className="bg-white/5 hover:bg-white/10 border border-white/5 rounded-xl p-4 transition-colors group cursor-pointer select-none"
                         >
                             <div className="flex justify-between items-start mb-2">
@@ -132,7 +133,7 @@ export default function DayDetails({ date, events, holiday, showNamedays, onEdit
                                     {new Date(event.date).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
                                 </span>
                             </div>
-                            
+
                             {event.description && (
                                 <p className="text-sm text-gray-400 mb-3 line-clamp-2">
                                     {event.description}
@@ -152,17 +153,17 @@ export default function DayDetails({ date, events, holiday, showNamedays, onEdit
 
             {/* Context Menu */}
             {contextMenu && (
-                <div 
-                    style={{ top: contextMenu.y, left: contextMenu.x }} 
+                <div
+                    style={{ top: contextMenu.y, left: contextMenu.x }}
                     className="fixed z-50 bg-[#252525] border border-white/10 rounded-lg shadow-xl py-1 min-w-[160px] animate-in fade-in zoom-in-95 duration-100"
                 >
-                    <button 
+                    <button
                         onClick={() => onEditEvent && onEditEvent(contextMenu.event)}
                         className="w-full text-left px-4 py-2 text-sm text-white hover:bg-white/10 transition-colors"
                     >
                         Modifier
                     </button>
-                    <button 
+                    <button
                         onClick={() => onDeleteEvent && onDeleteEvent(contextMenu.event.id)}
                         className="w-full text-left px-4 py-2 text-sm text-red-400 hover:bg-red-500/10 transition-colors"
                     >

@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Calendar, Clock, AlignLeft, Bell } from 'lucide-react';
+import CustomDatePicker from './CustomDatePicker';
+import CustomTimePicker from './CustomTimePicker';
 
 export default function EventModal({ isOpen, onClose, onSave, initialDate, initialEvent }) {
     const [title, setTitle] = useState('');
@@ -13,12 +15,26 @@ export default function EventModal({ isOpen, onClose, onSave, initialDate, initi
             if (initialEvent) {
                 setTitle(initialEvent.title);
                 const d = new Date(initialEvent.date);
-                setDate(d.toISOString().split('T')[0]);
-                setTime(d.toTimeString().slice(0, 5));
+
+                // Use local time for correct display date/time
+                const y = d.getFullYear();
+                const m = String(d.getMonth() + 1).padStart(2, '0');
+                const day = String(d.getDate()).padStart(2, '0');
+                setDate(`${y}-${m}-${day}`);
+
+                const hours = String(d.getHours()).padStart(2, '0');
+                const mins = String(d.getMinutes()).padStart(2, '0');
+                setTime(`${hours}:${mins}`);
+
                 setDescription(initialEvent.description || '');
                 setReminder(initialEvent.reminder || false);
             } else if (initialDate) {
-                setDate(initialDate.toISOString().split('T')[0]);
+                // Use local time for new event from calendar selection
+                const y = initialDate.getFullYear();
+                const m = String(initialDate.getMonth() + 1).padStart(2, '0');
+                const day = String(initialDate.getDate()).padStart(2, '0');
+                setDate(`${y}-${m}-${day}`);
+
                 setTime('09:00');
                 setTitle('');
                 setDescription('');
@@ -30,7 +46,7 @@ export default function EventModal({ isOpen, onClose, onSave, initialDate, initi
     const handleSubmit = (e) => {
         e.preventDefault();
         const eventDate = new Date(`${date}T${time}`);
-        
+
         onSave({
             id: initialEvent?.id || Date.now().toString(),
             title,
@@ -69,24 +85,18 @@ export default function EventModal({ isOpen, onClose, onSave, initialDate, initi
                     </div>
 
                     <div className="grid grid-cols-2 gap-4">
-                        <div className="relative">
-                            <Calendar className="absolute left-3 top-3 text-white/30" size={18} />
-                            <input
-                                type="date"
+                        <div className="relative z-20">
+                            <Calendar className="absolute left-3 top-3 text-white/30 z-10 pointer-events-none" size={18} />
+                            <CustomDatePicker
                                 value={date}
-                                onChange={(e) => setDate(e.target.value)}
-                                className="w-full bg-white/5 border border-white/10 rounded-xl pl-10 pr-4 py-2.5 text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50"
-                                required
+                                onChange={setDate}
                             />
                         </div>
-                        <div className="relative">
-                            <Clock className="absolute left-3 top-3 text-white/30" size={18} />
-                            <input
-                                type="time"
+                        <div className="relative z-20">
+                            <Clock className="absolute left-3 top-3 text-white/30 z-10 pointer-events-none" size={18} />
+                            <CustomTimePicker
                                 value={time}
-                                onChange={(e) => setTime(e.target.value)}
-                                className="w-full bg-white/5 border border-white/10 rounded-xl pl-10 pr-4 py-2.5 text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50"
-                                required
+                                onChange={setTime}
                             />
                         </div>
                     </div>

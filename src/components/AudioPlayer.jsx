@@ -1,17 +1,18 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Play, Pause, Volume2, VolumeX, MoreVertical, Edit2, Download } from 'lucide-react';
+import { Play, Pause, Volume2, VolumeX, Edit2, Download, Infinity } from 'lucide-react';
 import { save } from '@tauri-apps/plugin-dialog';
-import { writeFile, BaseDirectory } from '@tauri-apps/plugin-fs';
+import { writeFile } from '@tauri-apps/plugin-fs';
+import { playBubbleSound } from '../utils/sound';
 
 export default function AudioPlayer({ src, name, onRename }) {
     const [isPlaying, setIsPlaying] = useState(false);
     const [progress, setProgress] = useState(0);
     const [duration, setDuration] = useState(0);
-    const [volume, setVolume] = useState(1);
     const [isMuted, setIsMuted] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
     const [newName, setNewName] = useState(name);
-    
+    const [isAutomix, setIsAutomix] = useState(false); // Automix state
+
     const audioRef = useRef(null);
     const animationRef = useRef(null);
 
@@ -24,6 +25,13 @@ export default function AudioPlayer({ src, name, onRename }) {
             setIsPlaying(false);
             setProgress(0);
             cancelAnimationFrame(animationRef.current);
+            // If Automix is on, we would loop or play next here in a real app
+            if (isAutomix) {
+                audio.currentTime = 0;
+                audio.play();
+                setIsPlaying(true);
+                animationRef.current = requestAnimationFrame(updateProgress);
+            }
         };
 
         audio.addEventListener('loadedmetadata', updateDuration);
@@ -34,9 +42,10 @@ export default function AudioPlayer({ src, name, onRename }) {
             audio.removeEventListener('ended', onEnded);
             cancelAnimationFrame(animationRef.current);
         };
-    }, []);
+    }, [isAutomix]); // Re-bind if automix changes
 
     const togglePlay = () => {
+        playBubbleSound();
         const audio = audioRef.current;
         if (!audio) return;
 
@@ -68,11 +77,17 @@ export default function AudioPlayer({ src, name, onRename }) {
     };
 
     const toggleMute = () => {
+        playBubbleSound();
         const audio = audioRef.current;
         if (audio) {
             audio.muted = !isMuted;
             setIsMuted(!isMuted);
         }
+    };
+
+    const toggleAutomix = () => {
+        playBubbleSound();
+        setIsAutomix(!isAutomix);
     };
 
     const formatTime = (time) => {
@@ -90,6 +105,7 @@ export default function AudioPlayer({ src, name, onRename }) {
     };
 
     const handleDownload = async () => {
+        playBubbleSound();
         try {
             // Convert base64 to Uint8Array
             const base64Data = src.split(',')[1];
@@ -119,12 +135,12 @@ export default function AudioPlayer({ src, name, onRename }) {
     };
 
     return (
-        <div className="bg-[#252525] rounded-xl p-4 w-full shadow-lg border border-white/5 group hover:border-white/10 transition-all duration-300">
+        <div className="bg-black/40 backdrop-blur-xl rounded-2xl p-4 w-full shadow-2xl border border-white/10 group hover:border-white/20 transition-all duration-300">
             <audio ref={audioRef} src={src} />
-            
+
             {/* Header: Name & Actions */}
-            <div className="flex items-center justify-between mb-3">
-                <div className="flex-1 mr-4">
+            <div className="flex items-center justify-between mb-4">
+                <div className="flex-1 mr-4 min-w-0">
                     {isEditing ? (
                         <input
                             type="text"
@@ -132,12 +148,12 @@ export default function AudioPlayer({ src, name, onRename }) {
                             onChange={(e) => setNewName(e.target.value)}
                             onBlur={handleRename}
                             onKeyDown={(e) => e.key === 'Enter' && handleRename()}
-                            className="bg-black/20 text-white text-sm px-2 py-1 rounded w-full outline-none border border-blue-500/50 focus:border-blue-500"
+                            className="bg-white/10 text-white text-sm px-2 py-1 rounded w-full outline-none border border-blue-500/50 focus:border-blue-500 focus:bg-white/20 transition-all"
                             autoFocus
                         />
                     ) : (
-                        <h4 
-                            className="text-sm font-medium text-gray-200 truncate cursor-pointer hover:text-blue-400 transition-colors"
+                        <h4
+                            className="text-sm font-semibold text-gray-200 truncate cursor-pointer hover:text-blue-400 transition-colors"
                             onDoubleClick={() => setIsEditing(true)}
                             title="Double-cliquer pour renommer"
                         >
@@ -145,16 +161,16 @@ export default function AudioPlayer({ src, name, onRename }) {
                         </h4>
                     )}
                 </div>
-                
+
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-                    <button 
+                    <button
                         onClick={() => setIsEditing(!isEditing)}
                         className="p-1.5 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
                         title="Renommer"
                     >
                         <Edit2 className="w-3.5 h-3.5" />
                     </button>
-                    <button 
+                    <button
                         onClick={handleDownload}
                         className="p-1.5 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
                         title="Télécharger"
@@ -165,35 +181,45 @@ export default function AudioPlayer({ src, name, onRename }) {
             </div>
 
             {/* Controls & Waveform Placeholder */}
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-4">
                 <button
                     onClick={togglePlay}
-                    className="w-10 h-10 flex items-center justify-center rounded-full bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-900/20 transition-all duration-200 active:scale-95"
+                    className="w-12 h-12 flex items-center justify-center rounded-full bg-white text-black hover:scale-105 active:scale-95 transition-all duration-200 shadow-lg shadow-white/10"
                 >
-                    {isPlaying ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current ml-0.5" />}
+                    {isPlaying ? <Pause className="w-5 h-5 fill-current" /> : <Play className="w-5 h-5 fill-current ml-0.5" />}
                 </button>
 
-                <div className="flex-1 flex flex-col gap-1">
+                <div className="flex-1 flex flex-col gap-1.5">
                     <input
                         type="range"
                         min="0"
                         max={duration || 0}
                         value={progress}
                         onChange={handleSeek}
-                        className="w-full h-1.5 bg-gray-700 rounded-full appearance-none cursor-pointer accent-blue-500 hover:accent-blue-400 transition-all"
+                        className="w-full h-1 bg-white/20 rounded-full appearance-none cursor-pointer accent-white hover:accent-gray-200 transition-all"
                     />
-                    <div className="flex justify-between text-[10px] font-mono text-gray-500">
+                    <div className="flex justify-between text-[10px] font-medium text-gray-400 font-mono">
                         <span>{formatTime(progress)}</span>
                         <span>{formatTime(duration)}</span>
                     </div>
                 </div>
 
-                <button 
-                    onClick={toggleMute}
-                    className="p-2 text-gray-400 hover:text-white transition-colors"
-                >
-                    {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-                </button>
+                <div className="flex items-center gap-2">
+                    <button
+                        onClick={toggleAutomix}
+                        className={`p-2 rounded-lg transition-all ${isAutomix ? 'bg-white/20 text-white' : 'text-gray-500 hover:text-gray-300 hover:bg-white/5'}`}
+                        title="Automix (Boucle)"
+                    >
+                        <Infinity className="w-4 h-4" />
+                    </button>
+
+                    <button
+                        onClick={toggleMute}
+                        className="p-2 text-gray-400 hover:text-white transition-colors"
+                    >
+                        {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+                    </button>
+                </div>
             </div>
         </div>
     );

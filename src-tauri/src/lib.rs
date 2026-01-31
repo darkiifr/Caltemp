@@ -1,9 +1,11 @@
-use tauri::Manager;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, TrayIconBuilder, TrayIconEvent};
+use tauri::Manager;
 
 #[cfg(target_os = "windows")]
-use window_vibrancy::{apply_blur, apply_acrylic, apply_mica, clear_blur, clear_acrylic, clear_mica};
+use window_vibrancy::{
+    apply_acrylic, apply_blur, apply_mica, clear_acrylic, clear_blur, clear_mica,
+};
 #[cfg(target_os = "macos")]
 use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial};
 
@@ -16,9 +18,15 @@ fn set_window_effect(window: tauri::WebviewWindow, effect: &str) {
         let _ = clear_mica(&window);
 
         match effect {
-            "blur" => { let _ = apply_blur(&window, Some((18, 18, 18, 200))); },
-            "acrylic" => { let _ = apply_acrylic(&window, Some((18, 18, 18, 200))); },
-            "mica" => { let _ = apply_mica(&window, None); },
+            "blur" => {
+                let _ = apply_blur(&window, Some((18, 18, 18, 200)));
+            }
+            "acrylic" => {
+                let _ = apply_acrylic(&window, Some((18, 18, 18, 200)));
+            }
+            "mica" => {
+                let _ = apply_mica(&window, None);
+            }
             _ => {}
         }
     }
@@ -29,7 +37,7 @@ fn set_window_effect(window: tauri::WebviewWindow, effect: &str) {
             "popover" => Some(NSVisualEffectMaterial::Popover),
             "sidebar" => Some(NSVisualEffectMaterial::Sidebar),
             "under_window" => Some(NSVisualEffectMaterial::UnderWindowBackground),
-            _ => None
+            _ => None,
         };
         if let Some(m) = material {
             let _ = apply_vibrancy(&window, m, None, None);
@@ -46,6 +54,13 @@ fn greet(name: &str) -> String {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_autostart::Builder::new().build())
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            let _ = app
+                .get_webview_window("main")
+                .expect("no main window")
+                .set_focus();
+        }))
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_app::init())
         .plugin(tauri_plugin_clipboard_manager::init())

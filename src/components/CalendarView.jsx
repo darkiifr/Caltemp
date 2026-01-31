@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
 import { getHolidays } from '../utils/holidays';
 import { getNameDay } from '../utils/namedays';
 import DayDetails from './DayDetails';
+import { playBubbleSound } from '../utils/sound';
 
 const DAYS = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
 const MONTHS = [
@@ -44,11 +45,13 @@ export default function CalendarView({ events, onAddEvent, onEditEvent, onDelete
     const { days, firstDay } = getDaysInMonth(currentDate);
 
     const prevMonth = () => {
+        playBubbleSound();
         setDirection('left');
         setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1));
     };
 
     const nextMonth = () => {
+        playBubbleSound();
         setDirection('right');
         setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1));
     };
@@ -84,20 +87,20 @@ export default function CalendarView({ events, onAddEvent, onEditEvent, onDelete
     const getSelectedDayDetails = () => {
         const day = selectedDate.getDate();
         const dayEvents = events.filter(e => new Date(e.date).toDateString() === selectedDate.toDateString());
-        
+
         // Need to find holiday for selectedDate, not just current month view
         // But holidays state is only for current month view. 
         // Ideally we should fetch holidays for selectedDate year if different.
         // For simplicity, we assume selectedDate is usually in view or we fetch holidays for it.
         // Let's just use getHolidays util directly if year matches or just rely on current state if year matches.
-        
+
         let holiday = null;
         if (showHolidays) {
             const year = selectedDate.getFullYear();
             const month = String(selectedDate.getMonth() + 1).padStart(2, '0');
             const dayStr = String(day).padStart(2, '0');
             const dateStr = `${year}-${month}-${dayStr}`;
-            
+
             // If selected date is in current view year, use state, else fetch
             if (year === currentDate.getFullYear()) {
                 holiday = holidays.find(h => h.date === dateStr);
@@ -119,7 +122,7 @@ export default function CalendarView({ events, onAddEvent, onEditEvent, onDelete
                 const day = parseInt(parts[0]);
                 const month = parseInt(parts[1]) - 1;
                 const year = parseInt(parts[2]);
-                
+
                 if (!isNaN(day) && !isNaN(month) && !isNaN(year)) {
                     const newDate = new Date(year, month, day);
                     setCurrentDate(newDate);
@@ -163,7 +166,7 @@ export default function CalendarView({ events, onAddEvent, onEditEvent, onDelete
                                 className="px-4 py-2 text-sm font-medium bg-white/10 hover:bg-white/20 rounded-full transition-colors w-32 text-center outline-none border border-blue-500/50"
                             />
                         ) : (
-                            <button 
+                            <button
                                 onClick={(e) => {
                                     if (e.detail === 2) {
                                         setIsDateInputVisible(true);
@@ -172,7 +175,7 @@ export default function CalendarView({ events, onAddEvent, onEditEvent, onDelete
                                         setCurrentDate(now);
                                         setSelectedDate(now);
                                     }
-                                }} 
+                                }}
                                 className="px-4 py-2 text-sm font-medium bg-white/10 hover:bg-white/20 rounded-full transition-colors"
                             >
                                 Aujourd'hui
@@ -193,14 +196,14 @@ export default function CalendarView({ events, onAddEvent, onEditEvent, onDelete
                     ))}
                 </div>
 
-                <div 
+                <div
                     key={currentDate.toString()}
                     className={`grid grid-cols-7 gap-2 flex-1 auto-rows-fr min-h-[400px] ${direction === 'right' ? 'animate-month-right' : 'animate-month-left'}`}
                 >
                     {Array.from({ length: firstDay }).map((_, i) => (
                         <div key={`empty-${i}`} />
                     ))}
-                    
+
                     {Array.from({ length: days }).map((_, i) => {
                         const day = i + 1;
                         const dayEvents = getEventsForDay(day);
@@ -212,7 +215,7 @@ export default function CalendarView({ events, onAddEvent, onEditEvent, onDelete
                         return (
                             <div
                                 key={day}
-                                onClick={() => setSelectedDate(new Date(currentDate.getFullYear(), currentDate.getMonth(), day))}
+                                onClick={() => { playBubbleSound(); setSelectedDate(new Date(currentDate.getFullYear(), currentDate.getMonth(), day)); }}
                                 className={`
                                     relative group p-2 rounded-xl border transition-all duration-200 cursor-pointer flex flex-col
                                     ${today ? 'bg-blue-500/20 border-blue-500/50' : 'bg-white/5 border-white/5 hover:bg-white/10 hover:border-white/10'}
@@ -227,20 +230,20 @@ export default function CalendarView({ events, onAddEvent, onEditEvent, onDelete
                                         <span className="flex h-1.5 w-1.5 rounded-full bg-blue-500" />
                                     )}
                                 </div>
-                                
+
                                 <div className="flex-1 flex flex-col gap-1 overflow-hidden mt-1 min-h-0">
                                     {holiday && (
                                         <div className="text-[10px] font-medium text-purple-200 bg-purple-500/30 rounded px-1 py-0.5 truncate w-full text-center">
                                             {holiday.name}
                                         </div>
                                     )}
-                                    
+
                                     {dayEvents.slice(0, 3).map(event => (
                                         <div key={event.id} className="text-[10px] truncate text-white/70 bg-white/10 rounded px-1 py-0.5 w-full">
                                             {event.title}
                                         </div>
                                     ))}
-                                    
+
                                     {dayEvents.length > 3 && (
                                         <div className="text-[9px] text-white/30 pl-1">
                                             +{dayEvents.length - 3}
@@ -255,8 +258,9 @@ export default function CalendarView({ events, onAddEvent, onEditEvent, onDelete
                                 )}
 
                                 {/* Add Button (Hover) */}
-                                <button 
+                                <button
                                     onClick={(e) => {
+                                        playBubbleSound();
                                         e.stopPropagation();
                                         onAddEvent(new Date(currentDate.getFullYear(), currentDate.getMonth(), day));
                                     }}
@@ -269,11 +273,11 @@ export default function CalendarView({ events, onAddEvent, onEditEvent, onDelete
                     })}
                 </div>
             </div>
-            
+
             {/* Day Details Panel */}
-            <DayDetails 
-                date={selectedDate} 
-                events={selectedEvents} 
+            <DayDetails
+                date={selectedDate}
+                events={selectedEvents}
                 holiday={selectedHoliday}
                 showNamedays={showNamedays}
                 onEditEvent={onEditEvent}

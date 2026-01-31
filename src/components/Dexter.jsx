@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, Bot, User, Sparkles, X, Trash2 } from 'lucide-react';
 import { generateText } from '../services/ai';
+import { playBubbleSound } from '../utils/sound';
 
 export default function Dexter({ isOpen, onClose, settings, onAddEvent }) {
     const [messages, setMessages] = useState([
@@ -61,11 +62,6 @@ export default function Dexter({ isOpen, onClose, settings, onAddEvent }) {
 
     const parseCommand = (text) => {
         // Regex améliorée pour détecter un rappel
-        // Supporte:
-        // - "Rappel [titre] à [heure]"
-        // - "Rappel [titre] [heure]h"
-        // - "Rappel [titre] [heure]:[minute]"
-        // - "Rappel [heure] [titre]"
         const regex = /(?:rappel|événement|event|rdv)\s+(?:pour|le)?\s*(.*?)(?:\s+(?:à|@)\s*|\s+)(\d{1,2})(?:h|:)?(\d{2})?(?:\s+(.*))?/i;
         const match = text.match(regex);
 
@@ -74,13 +70,13 @@ export default function Dexter({ isOpen, onClose, settings, onAddEvent }) {
             const hour = parseInt(match[2]);
             const minute = match[3] ? parseInt(match[3]) : 0;
             const titlePart2 = match[4] ? match[4].trim() : '';
-            
+
             // Combine parts for title, prioritizing the text content
             let title = titlePart1;
             if (titlePart2) {
                 title = title ? `${title} ${titlePart2}` : titlePart2;
             }
-            
+
             // If title is empty (e.g. "Rappel 14h"), use a default
             if (!title) title = "Rappel";
 
@@ -89,7 +85,7 @@ export default function Dexter({ isOpen, onClose, settings, onAddEvent }) {
 
             const date = new Date();
             date.setHours(hour, minute, 0, 0);
-            
+
             // Si l'heure est passée, c'est pour demain
             if (date < new Date()) {
                 date.setDate(date.getDate() + 1);
@@ -118,15 +114,15 @@ export default function Dexter({ isOpen, onClose, settings, onAddEvent }) {
 
         // 1. Check for local commands
         const command = parseCommand(userMsg.content);
-        
+
         if (command && command.type === 'create_event') {
             setTimeout(() => {
                 onAddEvent(command.data);
                 const dateStr = new Date(command.data.date).toLocaleString('fr-FR', { weekday: 'long', hour: '2-digit', minute: '2-digit' });
-                setMessages(prev => [...prev, { 
-                    id: Date.now() + 1, 
-                    role: 'assistant', 
-                    content: `✅ C'est noté ! J'ai ajouté "${command.data.title}" pour ${dateStr}.` 
+                setMessages(prev => [...prev, {
+                    id: Date.now() + 1,
+                    role: 'assistant',
+                    content: `✅ C'est noté ! J'ai ajouté "${command.data.title}" pour ${dateStr}.`
                 }]);
                 setIsTyping(false);
             }, 600);
@@ -175,17 +171,17 @@ export default function Dexter({ isOpen, onClose, settings, onAddEvent }) {
 
                 // Check for JSON action
                 const jsonMatch = response.match(/```json\s*({[\s\S]*?})\s*```/) || response.match(/{[\s\S]*?}/);
-                
+
                 if (jsonMatch) {
                     try {
                         const action = JSON.parse(jsonMatch[1] || jsonMatch[0]);
                         if (action.action === 'create_event' && action.data) {
                             onAddEvent(action.data);
                             const dateStr = new Date(action.data.date).toLocaleString('fr-FR', { weekday: 'long', hour: '2-digit', minute: '2-digit' });
-                            setMessages(prev => [...prev, { 
-                                id: Date.now() + 1, 
-                                role: 'assistant', 
-                                content: `✅ C'est fait ! J'ai ajouté "${action.data.title}" pour ${dateStr}.` 
+                            setMessages(prev => [...prev, {
+                                id: Date.now() + 1,
+                                role: 'assistant',
+                                content: `✅ C'est fait ! J'ai ajouté "${action.data.title}" pour ${dateStr}.`
                             }]);
                             setIsTyping(false);
                             return;
@@ -195,29 +191,29 @@ export default function Dexter({ isOpen, onClose, settings, onAddEvent }) {
                     }
                 }
 
-                setMessages(prev => [...prev, { 
-                    id: Date.now() + 1, 
-                    role: 'assistant', 
-                    content: response 
+                setMessages(prev => [...prev, {
+                    id: Date.now() + 1,
+                    role: 'assistant',
+                    content: response
                 }]);
             } catch (error) {
-                setMessages(prev => [...prev, { 
-                    id: Date.now() + 1, 
-                    role: 'assistant', 
-                    content: `❌ Erreur IA : ${error.message || String(error)}` 
+                setMessages(prev => [...prev, {
+                    id: Date.now() + 1,
+                    role: 'assistant',
+                    content: `❌ Erreur IA : ${error.message || String(error)}`
                 }]);
             }
         } else {
             // No API key and no local command matched
             setTimeout(() => {
-                setMessages(prev => [...prev, { 
-                    id: Date.now() + 1, 
-                    role: 'assistant', 
-                    content: "Je ne peux pas répondre à cela. Configurez une clé API OpenRouter dans les paramètres pour activer l'intelligence artificielle, ou utilisez la commande 'Rappel [titre] à [heure]'." 
+                setMessages(prev => [...prev, {
+                    id: Date.now() + 1,
+                    role: 'assistant',
+                    content: "Je ne peux pas répondre à cela. Configurez une clé API OpenRouter dans les paramètres pour activer l'intelligence artificielle, ou utilisez la commande 'Rappel [titre] à [heure]'."
                 }]);
             }, 600);
         }
-        
+
         setIsTyping(false);
     };
 
@@ -225,6 +221,7 @@ export default function Dexter({ isOpen, onClose, settings, onAddEvent }) {
     const handleKeyDown = (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
+            playBubbleSound();
             handleSend();
         }
     };
@@ -236,54 +233,63 @@ export default function Dexter({ isOpen, onClose, settings, onAddEvent }) {
     if (!isOpen) return null;
 
     return (
-        <div 
-            style={{ 
-                left: position.x, 
+        <div
+            style={{
+                left: position.x,
                 top: position.y,
-                height: '600px' 
+                height: '600px'
             }}
-            className="fixed w-full sm:w-[380px] bg-[#1e1e1e]/90 backdrop-blur-xl shadow-2xl border border-white/10 rounded-2xl z-40 flex flex-col animate-in slide-in-from-right duration-300 overflow-hidden"
+            className="fixed w-full sm:w-[380px] bg-black/40 backdrop-blur-xl shadow-2xl border border-white/10 rounded-3xl z-40 flex flex-col animate-in slide-in-from-right duration-300 overflow-hidden ring-1 ring-white/10"
         >
-            {/* Header */}
-            <div 
-                className="h-10 border-b border-white/5 flex items-center justify-between px-4 bg-white/5 cursor-move select-none"
+            {/* Header with Gradient */}
+            <div
+                className="h-14 border-b border-white/5 flex items-center justify-between px-5 bg-gradient-to-r from-blue-600/20 to-purple-600/20 cursor-move select-none"
                 onMouseDown={handleMouseDown}
             >
-                <div className="flex items-center gap-2">
-                    <div className="w-12 h-1 bg-white/10 rounded-full mx-auto sm:hidden"></div>
+                <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-full bg-linear-to-tr from-blue-500 to-purple-500 flex items-center justify-center shadow-lg shadow-purple-500/30">
+                        <Bot className="w-5 h-5 text-white" />
+                    </div>
+                    <div className="flex flex-col">
+                        <span className="text-sm font-bold text-white leading-tight">Dexter</span>
+                        <span className="text-[10px] text-blue-200/70 font-medium">Assistant AI</span>
+                    </div>
                 </div>
                 <div className="flex items-center gap-1">
-                    <button onClick={clearHistory} className="p-1.5 text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors" title="Effacer l'historique">
-                        <Trash2 className="w-4 h-4" />
+                    <button onClick={clearHistory} className="p-2 text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded-full transition-colors" title="Effacer l'historique">
+                        <Trash2 className="w-3.5 h-3.5" />
                     </button>
-                    <button onClick={onClose} className="p-1.5 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors" title="Fermer">
+                    <button onClick={onClose} className="p-2 text-gray-400 hover:text-white hover:bg-white/10 rounded-full transition-colors" title="Fermer">
                         <X className="w-4 h-4" />
                     </button>
                 </div>
             </div>
 
             {/* Messages Area */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-6 custom-scrollbar">
+            <div className="flex-1 overflow-y-auto p-4 space-y-6 custom-scrollbar bg-gradient-to-b from-transparent to-black/20">
                 {messages.map((msg) => (
                     <div key={msg.id} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''} animate-in fade-in slide-in-from-bottom-2 duration-300`}>
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 shadow-md ${msg.role === 'user' ? 'bg-white/10' : 'bg-linear-to-br from-blue-500/20 to-purple-500/20 border border-white/5'}`}>
-                            {msg.role === 'user' ? <User className="w-4 h-4 text-gray-300" /> : <Bot className="w-4 h-4 text-blue-400" />}
-                        </div>
-                        <div className={`max-w-[85%] rounded-2xl px-5 py-3.5 text-sm leading-relaxed shadow-sm ${
-                            msg.role === 'user' 
-                                ? 'bg-blue-600 text-white rounded-tr-none shadow-blue-900/20' 
-                                : 'bg-[#2a2a2a]/80 backdrop-blur-sm text-gray-200 rounded-tl-none border border-white/5'
-                        }`}>
+                        {msg.role !== 'user' && (
+                            <div className="w-6 h-6 rounded-full bg-linear-to-br from-blue-500/20 to-purple-500/20 border border-white/5 flex items-center justify-center shrink-0 mt-1">
+                                <Bot className="w-3 h-3 text-blue-400" />
+                            </div>
+                        )}
+
+                        <div className={`max-w-[85%] px-4 py-3 text-sm leading-relaxed shadow-lg backdrop-blur-sm ${msg.role === 'user'
+                                ? 'bg-blue-600 text-white rounded-2xl rounded-tr-sm shadow-blue-500/10'
+                                : 'bg-[#2a2a2a]/60 text-gray-100 rounded-2xl rounded-tl-sm border border-white/5'
+                            }`}>
                             {msg.content}
                         </div>
                     </div>
                 ))}
+
                 {isTyping && (
                     <div className="flex gap-3 animate-in fade-in duration-300">
-                        <div className="w-8 h-8 rounded-full bg-linear-to-br from-blue-500/20 to-purple-500/20 border border-white/5 flex items-center justify-center shrink-0">
-                            <Bot className="w-4 h-4 text-blue-400" />
+                        <div className="w-6 h-6 rounded-full bg-linear-to-br from-blue-500/20 to-purple-500/20 border border-white/5 flex items-center justify-center shrink-0 mt-1">
+                            <Bot className="w-3 h-3 text-blue-400" />
                         </div>
-                        <div className="bg-[#2a2a2a]/80 backdrop-blur-sm rounded-2xl rounded-tl-none px-4 py-4 border border-white/5 flex items-center gap-1.5">
+                        <div className="bg-[#2a2a2a]/60 backdrop-blur-sm rounded-2xl rounded-tl-sm px-4 py-3 border border-white/5 flex items-center gap-1.5">
                             <span className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce"></span>
                             <span className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce delay-75"></span>
                             <span className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce delay-150"></span>
@@ -302,13 +308,13 @@ export default function Dexter({ isOpen, onClose, settings, onAddEvent }) {
                         onChange={(e) => setInput(e.target.value)}
                         onKeyDown={handleKeyDown}
                         placeholder="Ex: Rappel Dentiste à 14h..."
-                        className="w-full bg-black/20 text-white text-sm pl-4 pr-12 py-3.5 rounded-xl border border-white/10 outline-none focus:border-blue-500/50 focus:bg-black/40 transition-all resize-none custom-scrollbar placeholder:text-white/20"
+                        className="w-full bg-black/40 text-white text-sm pl-4 pr-12 py-3.5 rounded-2xl border border-white/10 outline-none focus:border-blue-500/50 focus:bg-black/60 transition-all resize-none custom-scrollbar placeholder:text-white/20 font-medium shadow-inner"
                         rows={1}
                     />
                     <button
-                        onClick={handleSend}
+                        onClick={() => { playBubbleSound(); handleSend(); }}
                         disabled={!input.trim() || isTyping}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:cursor-not-allowed text-white rounded-lg transition-all shadow-lg hover:shadow-blue-500/25 active:scale-95"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:cursor-not-allowed text-white rounded-xl transition-all shadow-lg hover:shadow-blue-500/25 active:scale-95"
                     >
                         {isTyping ? <Sparkles className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                     </button>
