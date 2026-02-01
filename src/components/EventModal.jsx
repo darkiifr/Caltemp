@@ -1,18 +1,20 @@
 import React, { useState, useEffect } from 'react';
-import { X, Calendar, Clock, AlignLeft, Bell } from 'lucide-react';
+import { X, Calendar, Clock, AlignLeft, Bell, Trash2 } from 'lucide-react';
 import CustomDatePicker from './CustomDatePicker';
 import CustomTimePicker from './CustomTimePicker';
 
-export default function EventModal({ isOpen, onClose, onSave, initialDate, initialEvent }) {
+export default function EventModal({ isOpen, onClose, onSave, onDelete, initialDate, initialEvent }) {
     const [title, setTitle] = useState('');
     const [date, setDate] = useState('');
     const [time, setTime] = useState('12:00');
     const [description, setDescription] = useState('');
     const [reminder, setReminder] = useState(false);
+    const [isDeleting, setIsDeleting] = useState(false);
 
     useEffect(() => {
         if (isOpen) {
             if (initialEvent) {
+                // eslint-disable-next-line
                 setTitle(initialEvent.title);
                 const d = new Date(initialEvent.date);
 
@@ -40,9 +42,23 @@ export default function EventModal({ isOpen, onClose, onSave, initialDate, initi
                 setDescription('');
                 setReminder(false);
             }
+        } else {
+            // Reset state when closed
+            setIsDeleting(false);
         }
     }, [isOpen, initialDate, initialEvent]);
 
+    const handleDeleteClick = () => {
+        if (isDeleting) {
+            if (onDelete) {
+                onDelete(initialEvent.id);
+                onClose();
+            }
+        } else {
+            setIsDeleting(true);
+        }
+    };
+    
     const handleSubmit = (e) => {
         e.preventDefault();
         const eventDate = new Date(`${date}T${time}`);
@@ -117,17 +133,44 @@ export default function EventModal({ isOpen, onClose, onSave, initialDate, initi
                         </div>
                         <div className="flex-1">
                             <div className="text-sm font-medium text-white">Rappel</div>
-                            <div className="text-xs text-white/40">M'avertir avant l'événement</div>
+                            <div className="text-xs text-white/40">M&apos;avertir avant l&apos;événement</div>
                         </div>
                         <div className={`w-5 h-5 rounded border ${reminder ? 'bg-blue-500 border-blue-500' : 'border-white/30'} flex items-center justify-center`}>
                             {reminder && <div className="w-2.5 h-2.5 bg-white rounded-sm" />}
                         </div>
                     </div>
 
-                    <div className="flex justify-end gap-3 mt-6">
-                        <button
-                            type="button"
-                            onClick={onClose}
+                    <div className="flex justify-between items-center gap-3 mt-6">
+                        {initialEvent ? (
+                            <div className="flex gap-2">
+                                <button
+                                    type="button"
+                                    onClick={handleDeleteClick}
+                                    className={`px-4 py-2 text-sm font-medium rounded-lg transition-all flex items-center gap-2 ${
+                                        isDeleting 
+                                        ? 'bg-red-500 text-white hover:bg-red-600' 
+                                        : 'text-red-400 hover:text-red-300 hover:bg-red-500/10'
+                                    }`}
+                                >
+                                    <Trash2 size={16} />
+                                    {isDeleting ? 'Confirmer ?' : 'Supprimer'}
+                                </button>
+                                {isDeleting && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setIsDeleting(false)}
+                                        className="px-3 py-2 text-sm font-medium text-white/50 hover:text-white rounded-lg transition-colors"
+                                    >
+                                        <X size={16} />
+                                    </button>
+                                )}
+                            </div>
+                        ) : <div />}
+                        
+                        <div className="flex gap-3">
+                            <button
+                                type="button"
+                                onClick={onClose}
                             className="px-4 py-2 text-sm font-medium text-white/70 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
                         >
                             Annuler
@@ -138,6 +181,7 @@ export default function EventModal({ isOpen, onClose, onSave, initialDate, initi
                         >
                             Enregistrer
                         </button>
+                        </div>
                     </div>
                 </form>
             </div>

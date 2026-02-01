@@ -1,16 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { X, Monitor, Cpu, Info, Check, RefreshCw, Layout, Type } from 'lucide-react';
+import { X, Monitor, Cpu, Info, Check, RefreshCw, Layout, Download, Upload, Coffee } from 'lucide-react';
 import { getVersion } from '@tauri-apps/plugin-app';
 import { check } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { invoke } from '@tauri-apps/api/core';
-import { message } from '@tauri-apps/plugin-dialog';
+import { message, save, ask } from '@tauri-apps/plugin-dialog';
+import { open as openLink } from '@tauri-apps/plugin-shell';
 import UpdateModal from './UpdateModal';
-import { getYearDetails } from '../utils/holidays';
 import { open } from '@tauri-apps/plugin-dialog';
 import { Trash2, Plus, Volume2, Music, Play } from 'lucide-react';
 import { enable, disable, isEnabled } from '@tauri-apps/plugin-autostart';
 import { playBubbleSound, playRingtone, playNotificationSound } from '../utils/sound';
+import { generateICS, parseICS } from '../utils/ics';
+import { writeTextFile, readTextFile } from '@tauri-apps/plugin-fs';
 
 const DEFAULT_MODELS = [
     { id: 'mistralai/mistral-7b-instruct', name: 'Mistral 7B (Gratuit)' },
@@ -20,7 +22,7 @@ const DEFAULT_MODELS = [
     { id: 'google/gemini-pro', name: 'Gemini Pro' },
 ];
 
-export default function SettingsModal({ isOpen, onClose, settings, onSave, onPreview }) {
+export default function SettingsModal({ isOpen, onClose, settings, onSave, onPreview, events, onImportEvents }) {
     const [activeTab, setActiveTab] = useState('general');
     const [appVersion, setAppVersion] = useState('Unknown');
     const [updateStatus, setUpdateStatus] = useState(null);
@@ -28,10 +30,10 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave, onPre
     const [showUpdateModal, setShowUpdateModal] = useState(false);
     const [availableUpdate, setAvailableUpdate] = useState(null);
     const [newModelInput, setNewModelInput] = useState('');
-    const yearDetails = getYearDetails(new Date().getFullYear());
 
     useEffect(() => {
         if (isOpen) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect
             setLocalSettings({ ...settings, customModels: settings.customModels || [] });
 
             // Check autostart status
@@ -89,7 +91,72 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave, onPre
 
     const handleSave = () => {
         onSave(localSettings);
-        onClose();
+        // Do not call onClose here, let the parent handle it
+    };
+
+    const handleExportICS = async () => {
+        try {
+            const icsData = generateICS(events);
+            if (!icsData) {
+                await message('Aucun événement à exporter.', { kind: 'info' });
+                return;
+            }
+
+            const path = await save({
+                filters: [{
+                    name: 'Calendar',
+                    extensions: ['ics']
+                }],
+                defaultPath: 'caltemp_export.ics'
+            });
+
+            if (path) {
+                await writeTextFile(path, icsData);
+                await message('Exportation réussie !', { kind: 'info', title: 'Export' });
+            }
+        } catch (e) {
+            console.error(e);
+            await message('Erreur lors de l\'exportation: ' + e, { kind: 'error' });
+        }
+    };
+
+    const handleImportICS = async () => {
+        try {
+            const selected = await open({
+                multiple: false,
+                filters: [{
+                    name: 'Calendar',
+                    extensions: ['ics']
+                }]
+            });
+
+            if (selected) {
+                const content = await readTextFile(selected);
+                const importedEvents = parseICS(content);
+                
+                if (importedEvents.length === 0) {
+                    await message('Aucun événement trouvé dans ce fichier.', { kind: 'warning' });
+                    return;
+                }
+
+                const shouldImport = await ask(
+                    `Trouvé ${importedEvents.length} événements. Voulez-vous les importer ?`,
+                    { 
+                        title: 'Confirmer l\'importation',
+                        kind: 'info'
+                    }
+                );
+
+                if (shouldImport && onImportEvents) {
+                    onImportEvents(importedEvents);
+                    await message('Importation réussie !', { kind: 'info', title: 'Import' });
+                    onClose();
+                }
+            }
+        } catch (e) {
+            console.error(e);
+            await message('Erreur lors de l\'importation: ' + e, { kind: 'error' });
+        }
     };
 
     const checkForUpdates = async () => {
@@ -205,6 +272,21 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave, onPre
                                 {tab.label}
                             </button>
                         ))}
+
+                        <div className="mt-auto pt-4 border-t border-white/5">
+                            <button
+                                onClick={() => openLink('https://ko-fi.com/darkiifr')}
+                                className="w-full flex items-center gap-3 p-3 bg-gradient-to-r from-[#29abe0]/10 to-[#ff5f5f]/10 border border-white/5 hover:border-white/20 hover:brightness-110 rounded-xl transition-all group"
+                            >
+                                <div className="p-2 bg-[#FF5E5B]/20 text-[#FF5E5B] group-hover:text-white group-hover:bg-[#FF5E5B] rounded-lg transition-colors">
+                                    <Coffee className="w-4 h-4" />
+                                </div>
+                                <div className="text-left">
+                                    <div className="font-medium text-white text-sm">Soutenir le projet</div>
+                                    <div className="text-xs text-gray-400">Offrez-moi un café !</div>
+                                </div>
+                            </button>
+                        </div>
                     </div>
 
                     {/* Content */}
@@ -248,6 +330,37 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave, onPre
                                                 <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${localSettings.notifications ? 'left-7' : 'left-1'}`} />
                                             </div>
                                         </label>
+
+                                        <div className="pt-4 border-t border-white/5">
+                                             <h4 className="text-sm font-medium text-gray-400 uppercase tracking-wider mb-4">Données</h4>
+                                             <div className="flex gap-4">
+                                                 <button 
+                                                    onClick={handleExportICS}
+                                                    className="flex-1 flex items-center gap-3 p-4 bg-white/5 hover:bg-white/10 rounded-xl transition-all group"
+                                                 >
+                                                    <div className="p-2 bg-purple-500/20 text-purple-400 group-hover:bg-purple-500 group-hover:text-white rounded-lg transition-colors">
+                                                        <Download size={20} />
+                                                    </div>
+                                                    <div className="text-left">
+                                                        <div className="font-medium text-white">Exporter</div>
+                                                        <div className="text-xs text-gray-400">Format .ics</div>
+                                                    </div>
+                                                 </button>
+
+                                                 <button 
+                                                    onClick={handleImportICS}
+                                                    className="flex-1 flex items-center gap-3 p-4 bg-white/5 hover:bg-white/10 rounded-xl transition-all group"
+                                                 >
+                                                    <div className="p-2 bg-blue-500/20 text-blue-400 group-hover:bg-blue-500 group-hover:text-white rounded-lg transition-colors">
+                                                        <Upload size={20} />
+                                                    </div>
+                                                    <div className="text-left">
+                                                        <div className="font-medium text-white">Importer</div>
+                                                        <div className="text-xs text-gray-400">Format .ics</div>
+                                                    </div>
+                                                 </button>
+                                             </div>
+                                        </div>
 
                                         <label className="flex items-center justify-between p-4 bg-white/5 rounded-xl cursor-pointer hover:bg-white/10 transition-colors">
                                             <div>
@@ -342,9 +455,9 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave, onPre
                                         <h4 className="text-sm font-medium text-gray-400 uppercase tracking-wider">Personnalisation sonore</h4>
 
                                         {[
-                                            { id: 'bubble', label: 'Son de clic (Bubble)', desc: 'Joué lors des interactions simples' },
-                                            { id: 'notification', label: 'Notification', desc: 'Joué lors de l\'enregistrement d\'un événement' },
-                                            { id: 'ringtone', label: 'Sonnerie', desc: 'Joué pour les rappels d\'événements' }
+                                            { id: 'bubble', label: 'Son de clic (Bubble)', desc: "Joué lors des interactions simples" },
+                                            { id: 'notification', label: 'Notification', desc: "Joué lors de l'enregistrement d'un événement" },
+                                            { id: 'ringtone', label: 'Sonnerie', desc: "Joué pour les rappels d'événements" }
                                         ].map(sound => (
                                             <div key={sound.id} className="p-4 bg-white/5 rounded-xl border border-white/5">
                                                 <div className="flex justify-between items-start mb-3">
@@ -407,7 +520,7 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave, onPre
                                             <div>
                                                 <h4 className="font-medium text-blue-400">Assistant Dexter</h4>
                                                 <p className="text-sm text-blue-300/70 mt-1">
-                                                    Configurez l'IA pour obtenir de l'aide sur vos événements et notes.
+                                                    Configurez l&apos;IA pour obtenir de l&apos;aide sur vos événements et notes.
                                                 </p>
                                             </div>
                                         </div>

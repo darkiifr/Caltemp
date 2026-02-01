@@ -1,5 +1,5 @@
 import { readTextFile, writeTextFile, exists, mkdir, BaseDirectory } from '@tauri-apps/plugin-fs';
-import { appDataDir } from '@tauri-apps/api/path';
+// import { appDataDir } from '@tauri-apps/api/path';
 
 const EVENTS_FILE = 'events.json';
 const SETTINGS_FILE = 'settings.json';

@@ -16,6 +16,14 @@ export default function AudioPlayer({ src, name, onRename }) {
     const audioRef = useRef(null);
     const animationRef = useRef(null);
 
+    const updateProgress = () => {
+        const audio = audioRef.current;
+        if (audio) {
+            setProgress(audio.currentTime);
+            animationRef.current = requestAnimationFrame(updateProgress);
+        }
+    };
+
     useEffect(() => {
         const audio = audioRef.current;
         if (!audio) return;
@@ -42,6 +50,7 @@ export default function AudioPlayer({ src, name, onRename }) {
             audio.removeEventListener('ended', onEnded);
             cancelAnimationFrame(animationRef.current);
         };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isAutomix]); // Re-bind if automix changes
 
     const togglePlay = () => {
@@ -57,14 +66,6 @@ export default function AudioPlayer({ src, name, onRename }) {
             animationRef.current = requestAnimationFrame(updateProgress);
         }
         setIsPlaying(!isPlaying);
-    };
-
-    const updateProgress = () => {
-        const audio = audioRef.current;
-        if (audio) {
-            setProgress(audio.currentTime);
-            animationRef.current = requestAnimationFrame(updateProgress);
-        }
     };
 
     const handleSeek = (e) => {

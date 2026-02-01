@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "lint": "eslint ."
   },
   "dependencies": {
     "@tailwindcss/postcss": "^4.1.17",
@@ -38,6 +39,10 @@
   "devDependencies": {
     "@tauri-apps/cli": "^2",
     "@vitejs/plugin-react": "^4.6.0",
+    "eslint": "^9.39.2",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "globals": "^17.3.0",
     "vite": "^7.0.4"
   }
 }

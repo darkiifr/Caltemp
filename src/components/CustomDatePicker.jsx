@@ -10,14 +10,15 @@ const MONTHS = [
 
 export default function CustomDatePicker({ value, onChange }) {
     // value format: YYYY-MM-DD
-    const [viewDate, setViewDate] = useState(new Date()); // For navigating months
+    const [viewDate, setViewDate] = useState(() => value ? new Date(value) : new Date()); // For navigating months
     const [isOpen, setIsOpen] = useState(false);
 
     useEffect(() => {
         if (value) {
+            // eslint-disable-next-line
             setViewDate(new Date(value));
         }
-    }, []);
+    }, [value]);
 
     const getDaysInMonth = (year, month) => {
         return new Date(year, month + 1, 0).getDate();

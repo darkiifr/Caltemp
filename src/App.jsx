@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
-import { Calendar as CalendarIcon, Settings, Bot, Bell } from 'lucide-react';
+import { Calendar as CalendarIcon, Settings, Bot } from 'lucide-react';
 import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { invoke } from '@tauri-apps/api/core';
 import { type } from '@tauri-apps/plugin-os';
 import CalendarView from "./components/CalendarView";
@@ -9,6 +10,7 @@ import SettingsModal from "./components/SettingsModal";
 import Dexter from "./components/Dexter";
 import Titlebar from "./components/Titlebar";
 import ContextMenu from "./components/ContextMenu";
+import NotificationToast from "./components/NotificationToast";
 import "./App.css";
 import { loadEvents, saveEvents, loadSettings, saveSettings } from "./services/fileManager";
 
@@ -24,6 +26,7 @@ function App() {
   const [osType, setOsType] = useState('');
   const [contextMenu, setContextMenu] = useState({ visible: false, x: 0, y: 0 });
   const [isLoaded, setIsLoaded] = useState(false);
+  const [toastNotification, setToastNotification] = useState(null);
 
   const [settings, setSettings] = useState({
     theme: 'dark',
@@ -106,23 +109,63 @@ function App() {
     initData();
   }, []);
 
+  // Apply font size to root for rem scaling
+  useEffect(() => {
+    // Default to 16px if undefined
+    const size = currentSettings.fontSize || 16;
+    document.documentElement.style.fontSize = `${size}px`;
+  }, [currentSettings.fontSize]);
+
+  // Helper for notifications
+  const notify = React.useCallback(async (title, body, type = 'info') => {
+    if (!settings.notifications) return;
+
+    if (type === 'reminder') {
+      await playRingtone();
+    } else {
+      await playNotificationSound();
+    }
+
+    // Always show internal toast
+    setToastNotification({ title, body, type });
+
+    // Handle background / minimized state
+    if (!document.hasFocus()) {
+       try {
+          const appWindow = getCurrentWindow();
+          await appWindow.unminimize();
+          await appWindow.setFocus();
+       } catch (e) {
+          console.error("Failed to focus window:", e);
+          // Fallback to system notification if focus fails 
+          // (user asked not to use PowerShell, but if we can't focus, we might miss it completely. 
+          // However, user was emphatic about 'le logiciel'. Let's trust the sound + unminimize focus)
+       }
+    }
+  }, [settings.notifications]);
+
   // Check for reminders every minute
   useEffect(() => {
     const interval = setInterval(() => {
       const now = new Date();
       const updatedEvents = events.map(event => {
-        if (event.reminder && !event.notified) {
+        if (event.reminder) {
+          // Check if fully notified
+          if (event.notified === true || event.notified === 'final') return event;
+
           const eventDate = new Date(event.date);
           const timeDiff = eventDate - now;
 
-          // Notify 15 minutes before (or at time if missed)
-          if (timeDiff > 0 && timeDiff <= 15 * 60 * 1000) {
-            playRingtone();
-            sendNotification({
-              title: 'Rappel Caltemp',
-              body: `Bientôt : ${event.title}`,
-            });
-            return { ...event, notified: true };
+          // Phase 2: Final / At Time (within 5 mins late)
+          if (timeDiff <= 0 && timeDiff > -5 * 60 * 1000) {
+             notify('Rappel Caltemp', `Maintenant : ${event.title}`, 'reminder');
+             return { ...event, notified: 'final' };
+          }
+
+          // Phase 1: Early (within 15 mins)
+          if (event.notified !== 'early' && timeDiff > 0 && timeDiff <= 15 * 60 * 1000) {
+             notify('Rappel Caltemp', `Bientôt : ${event.title}`, 'reminder');
+             return { ...event, notified: 'early' };
           }
         }
         return event;
@@ -133,9 +176,9 @@ function App() {
         setEvents(updatedEvents);
         saveEvents(updatedEvents); // Persist notification state
       }
-    }, 60000);
+    }, 5000); // Check every 5 seconds for precision
     return () => clearInterval(interval);
-  }, [events, isLoaded]);
+  }, [events, isLoaded, settings, notify]); // Added settings dependency
 
   const handleAddEvent = (date) => {
     setSelectedDate(date);
@@ -151,13 +194,18 @@ function App() {
     setEvents(updatedEvents);
     await saveEvents(updatedEvents);
 
-    if (settings.notifications) {
-      playNotificationSound();
-      sendNotification({
-        title: 'Événement enregistré',
-        body: `${newEvent.title} le ${new Date(newEvent.date).toLocaleDateString()}`
-      });
-    }
+    notify(
+      'Événement enregistré',
+      `${newEvent.title} le ${new Date(newEvent.date).toLocaleDateString()}`,
+      'success'
+    );
+  };
+
+  const handleImportEvents = async (importedEvents) => {
+    const newEvents = [...events, ...importedEvents];
+    setEvents(newEvents);
+    await saveEvents(newEvents);
+    notify('Importation', `${importedEvents.length} événements importés`, 'success');
   };
 
   const handleDeleteEvent = async (eventId) => {
@@ -180,7 +228,6 @@ function App() {
       onContextMenu={handleContextMenu}
       className={`h-screen w-screen flex flex-col text-white overflow-hidden border border-white/10 ${(!currentSettings.windowEffect || currentSettings.windowEffect !== 'none') ? 'bg-transparent' : 'bg-[#121212]'
         }`}
-      style={{ fontSize: `${currentSettings.fontSize || 16}px` }}
     >
       <Titlebar style={currentSettings.titlebarStyle || 'macos'} osType={osType} />
 
@@ -244,12 +291,15 @@ function App() {
         isOpen={isEventModalOpen}
         onClose={() => setIsEventModalOpen(false)}
         onSave={handleSaveEvent}
+        onDelete={handleDeleteEvent}
         initialDate={selectedDate}
         initialEvent={selectedEvent}
       />
 
       <SettingsModal
         isOpen={isSettingsOpen}
+        events={events}
+        onImportEvents={handleImportEvents}
         onClose={() => {
           setPreviewSettings(null);
           // Revert window effect if needed
@@ -263,11 +313,27 @@ function App() {
         onSave={async (newSettings) => {
           setSettings(newSettings);
           setPreviewSettings(null);
-          await saveSettings(newSettings);
-          if (newSettings.soundConfig) {
-            configureSounds(newSettings.soundConfig);
+          
+          try {
+            await saveSettings(newSettings);
+            // Re-apply window effect to ensure persistence
+            if (newSettings.windowEffect) {
+              await invoke('set_window_effect', { effect: newSettings.windowEffect });
+            }
+            if (newSettings.soundConfig) {
+              configureSounds(newSettings.soundConfig);
+            }
+          } catch (e) {
+            console.error("Failed to save settings:", e);
           }
+
+          setIsSettingsOpen(false);
         }}
+      />
+
+      <NotificationToast
+        notification={toastNotification}
+        onClose={() => setToastNotification(null)}
       />
 
       <ContextMenu

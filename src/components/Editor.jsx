@@ -1,9 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Sparkles, Mic, MicOff, Image as ImageIcon, StopCircle, Trash2, MoveLeft, MoveRight, Copy, ClipboardPaste, Volume2, Check, X, Video, Paperclip } from 'lucide-react';
+import { Sparkles, Mic, MicOff, Image as ImageIcon, StopCircle, Trash2, MoveLeft, MoveRight, Copy, ClipboardPaste, Volume2, Check, X, Paperclip } from 'lucide-react';
 import { generateText } from '../services/ai';
 import AudioPlayer from './AudioPlayer';
 import { writeText, readImage, readText } from '@tauri-apps/plugin-clipboard-manager';
-import { open } from '@tauri-apps/plugin-shell';
+// import { open } from '@tauri-apps/plugin-shell';
 
 export default function Editor({ note, onUpdateNote, settings }) {
     const [isGenerating, setIsGenerating] = useState(false);
@@ -40,6 +40,7 @@ export default function Editor({ note, onUpdateNote, settings }) {
         if (typeof window !== 'undefined' && ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             recognitionRef.current = new SpeechRecognition();
+
             recognitionRef.current.continuous = true;
             recognitionRef.current.interimResults = true;
             recognitionRef.current.lang = 'fr-FR';
@@ -125,6 +126,7 @@ export default function Editor({ note, onUpdateNote, settings }) {
             if (recognitionRef.current) recognitionRef.current.stop();
             window.speechSynthesis.cancel();
         };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     const toggleListening = () => {
@@ -204,6 +206,7 @@ export default function Editor({ note, onUpdateNote, settings }) {
         }, 1000); // Wait 1s after typing stops
 
         return () => clearTimeout(timer);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [note?.content, settings?.aiApiKey]);
 
     if (!note) {
@@ -245,37 +248,6 @@ export default function Editor({ note, onUpdateNote, settings }) {
             onUpdateNote({ ...note, content: newContent, updatedAt: Date.now() });
             setSuggestion(null);
         }
-    };
-
-    // Open link in browser
-    const handleOpenLink = async (url) => {
-        try {
-            await open(url);
-        } catch (err) {
-            console.error('Failed to open link:', err);
-        }
-    };
-
-    // Render content with clickable links
-    const renderContentWithLinks = (text) => {
-        const urlRegex = /(https?:\/\/[^\s]+)/g;
-        const parts = text.split(urlRegex);
-
-        return parts.map((part, index) => {
-            if (part.match(urlRegex)) {
-                return (
-                    <span
-                        key={index}
-                        onClick={() => handleOpenLink(part)}
-                        className="text-blue-400 underline cursor-pointer hover:text-blue-300"
-                        title="Cliquer pour ouvrir"
-                    >
-                        {part}
-                    </span>
-                );
-            }
-            return part;
-        });
     };
 
     // Helper: Add attachment

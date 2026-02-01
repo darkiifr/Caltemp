@@ -8,7 +8,6 @@ export default function CustomTimePicker({ value, onChange }) {
 
     // Generate arrays
     const hours = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
-    const minutes = Array.from({ length: 12 }, (_, i) => String(i * 5).padStart(2, '0')); // Steps of 5 for simpler UI
     // Or plain 0-59 if user really wants precision? Image 2 shows "00" selected, suggesting regular intervals or full list.
     // Let's do full 0-59 for precision but maybe scrollable.
     // Actually, let's keep it simple: 00-59 is fine for a scroll list.
@@ -60,6 +59,7 @@ export default function CustomTimePicker({ value, onChange }) {
                         <div ref={hoursRef} className="flex-1 overflow-y-auto custom-scrollbar px-1">
                             {hours.map(h => (
                                 <button
+                                    type="button"
                                     id={`time-h-${h}`}
                                     key={h}
                                     onClick={() => handleSelectHour(h)}
@@ -77,6 +77,7 @@ export default function CustomTimePicker({ value, onChange }) {
                         <div ref={minsRef} className="flex-1 overflow-y-auto custom-scrollbar px-1">
                             {allMinutes.map(m => (
                                 <button
+                                    type="button"
                                     id={`time-m-${m}`}
                                     key={m}
                                     onClick={() => handleSelectMin(m)}

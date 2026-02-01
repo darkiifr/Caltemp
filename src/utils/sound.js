@@ -56,7 +56,7 @@ export const playBubbleSound = async () => {
     // 2. Fallback to Synthesis
     const ctx = getAudioContext();
     if (ctx.state === 'suspended') {
-        try { await ctx.resume(); } catch (e) { console.warn("Cannot resume audio context without user gesture"); }
+        try { await ctx.resume(); } catch { console.warn("Cannot resume audio context without user gesture"); }
     }
 
     const oscillator = ctx.createOscillator();
@@ -90,7 +90,7 @@ export const playRingtone = async () => {
     const ctx = getAudioContext();
     // Force resume attempt
     if (ctx.state === 'suspended') {
-        try { await ctx.resume(); } catch (e) { }
+        try { await ctx.resume(); } catch { }
     }
 
     const now = ctx.currentTime;
@@ -142,7 +142,7 @@ export const playNotificationSound = async () => {
     // 2. Fallback
     const ctx = getAudioContext();
     if (ctx.state === 'suspended') {
-        try { await ctx.resume(); } catch (e) { }
+        try { await ctx.resume(); } catch { }
     }
 
     const now = ctx.currentTime;

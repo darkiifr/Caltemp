@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User, Sparkles, X, Trash2 } from 'lucide-react';
+import { Send, Bot, Sparkles, X, Trash2 } from 'lucide-react';
 import { generateText } from '../services/ai';
 import { playBubbleSound } from '../utils/sound';
 
