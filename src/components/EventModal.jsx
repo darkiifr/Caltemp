@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, Calendar, Clock, AlignLeft, Bell, Trash2 } from 'lucide-react';
 import CustomDatePicker from './CustomDatePicker';
 import CustomTimePicker from './CustomTimePicker';
+import CustomRecurrenceSelect from './CustomRecurrenceSelect';
 
 export default function EventModal({ isOpen, onClose, onSave, onDelete, initialDate, initialEvent }) {
     const [title, setTitle] = useState('');
@@ -9,6 +10,7 @@ export default function EventModal({ isOpen, onClose, onSave, onDelete, initialD
     const [time, setTime] = useState('12:00');
     const [description, setDescription] = useState('');
     const [reminder, setReminder] = useState(false);
+    const [recurrence, setRecurrence] = useState('none');
     const [isDeleting, setIsDeleting] = useState(false);
 
     useEffect(() => {
@@ -16,7 +18,7 @@ export default function EventModal({ isOpen, onClose, onSave, onDelete, initialD
             if (initialEvent) {
                 // eslint-disable-next-line
                 setTitle(initialEvent.title);
-                const d = new Date(initialEvent.date);
+                const d = new Date(initialEvent.originalDate || initialEvent.date);
 
                 // Use local time for correct display date/time
                 const y = d.getFullYear();
@@ -30,6 +32,7 @@ export default function EventModal({ isOpen, onClose, onSave, onDelete, initialD
 
                 setDescription(initialEvent.description || '');
                 setReminder(initialEvent.reminder || false);
+                setRecurrence(initialEvent.recurrence || 'none');
             } else if (initialDate) {
                 // Use local time for new event from calendar selection
                 const y = initialDate.getFullYear();
@@ -41,6 +44,7 @@ export default function EventModal({ isOpen, onClose, onSave, onDelete, initialD
                 setTitle('');
                 setDescription('');
                 setReminder(false);
+                setRecurrence('none');
             }
         } else {
             // Reset state when closed
@@ -68,7 +72,9 @@ export default function EventModal({ isOpen, onClose, onSave, onDelete, initialD
             title,
             date: eventDate.toISOString(),
             description,
-            reminder
+            reminder,
+            recurrence,
+            ...(initialEvent?.notifiedOccurrences && { notifiedOccurrences: initialEvent.notifiedOccurrences })
         });
         onClose();
     };
@@ -124,6 +130,14 @@ export default function EventModal({ isOpen, onClose, onSave, onDelete, initialD
                             value={description}
                             onChange={(e) => setDescription(e.target.value)}
                             className="w-full bg-white/5 border border-white/10 rounded-xl pl-10 pr-4 py-3 text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-blue-500/50 min-h-[100px] resize-none"
+                        />
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-2 relative z-10">
+                        <label className="text-sm font-medium text-white/70 ml-1">Récurrence</label>
+                        <CustomRecurrenceSelect 
+                            value={recurrence}
+                            onChange={setRecurrence}
                         />
                     </div>
 

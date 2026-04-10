@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Calendar as CalendarIcon, Settings, Bot } from 'lucide-react';
+import { Calendar as CalendarIcon, Settings, Bot, ListTodo } from 'lucide-react';
 import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { invoke } from '@tauri-apps/api/core';
@@ -7,6 +7,7 @@ import { type } from '@tauri-apps/plugin-os';
 import CalendarView from "./components/CalendarView";
 import EventModal from "./components/EventModal";
 import SettingsModal from "./components/SettingsModal";
+import RemindersModal from "./components/RemindersModal";
 import Dexter from "./components/Dexter";
 import Titlebar from "./components/Titlebar";
 import ContextMenu from "./components/ContextMenu";
@@ -15,12 +16,14 @@ import "./App.css";
 import { loadEvents, saveEvents, loadSettings, saveSettings } from "./services/fileManager";
 
 import { playBubbleSound, playRingtone, playNotificationSound, configureSounds, resumeAudioContext } from "./utils/sound";
+import { getNextOccurrence } from "./utils/eventUtils";
 
 function App() {
   const [events, setEvents] = useState([]);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isDexterOpen, setIsDexterOpen] = useState(false);
   const [isEventModalOpen, setIsEventModalOpen] = useState(false);
+  const [isRemindersOpen, setIsRemindersOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState(null);
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [osType, setOsType] = useState('');
@@ -129,6 +132,12 @@ function App() {
     // Always show internal toast
     setToastNotification({ title, body, type });
 
+    try {
+        sendNotification({ title, body });
+    } catch (e) {
+        console.error("Failed to send native notification:", e);
+    }
+
     // Handle background / minimized state
     if (!document.hasFocus()) {
        try {
@@ -150,22 +159,37 @@ function App() {
       const now = new Date();
       const updatedEvents = events.map(event => {
         if (event.reminder) {
-          // Check if fully notified
-          if (event.notified === true || event.notified === 'final') return event;
+          // Allow catching occurrences that happened up to 5 minutes ago
+          const checkFromDate = new Date(now.getTime() - 5 * 60 * 1000);
+          const occ = getNextOccurrence(event, checkFromDate);
+          
+          if (!occ) return event;
 
-          const eventDate = new Date(event.date);
-          const timeDiff = eventDate - now;
+          const timeDiff = occ - now;
+          const occKey = occ.getTime().toString();
+          
+          const isFinalNotified = event.notifiedOccurrences && event.notifiedOccurrences[occKey] === 'final';
+          const isEarlyNotified = event.notifiedOccurrences && event.notifiedOccurrences[occKey] === 'early';
+
+          // If fully notified for this occurrence, do nothing
+          if (isFinalNotified) return event;
 
           // Phase 2: Final / At Time (within 5 mins late)
           if (timeDiff <= 0 && timeDiff > -5 * 60 * 1000) {
              notify('Rappel Caltemp', `Maintenant : ${event.title}`, 'reminder');
-             return { ...event, notified: 'final' };
+             return { 
+                 ...event, 
+                 notifiedOccurrences: { ...(event.notifiedOccurrences || {}), [occKey]: 'final' } 
+             };
           }
 
           // Phase 1: Early (within 15 mins)
-          if (event.notified !== 'early' && timeDiff > 0 && timeDiff <= 15 * 60 * 1000) {
+          if (!isEarlyNotified && !isFinalNotified && timeDiff > 0 && timeDiff <= 15 * 60 * 1000) {
              notify('Rappel Caltemp', `Bientôt : ${event.title}`, 'reminder');
-             return { ...event, notified: 'early' };
+             return { 
+                 ...event, 
+                 notifiedOccurrences: { ...(event.notifiedOccurrences || {}), [occKey]: 'early' } 
+             };
           }
         }
         return event;
@@ -246,8 +270,17 @@ function App() {
           <button
             onClick={() => { playBubbleSound(); setIsDexterOpen(!isDexterOpen); }}
             className={`p-3 rounded-xl transition-all ${isDexterOpen ? 'bg-purple-500 text-white shadow-lg shadow-purple-500/20' : 'hover:bg-white/10 text-white/50 hover:text-white'}`}
+            title="Assistant Dexter"
           >
             <Bot size={24} />
+          </button>
+
+          <button
+            onClick={() => { playBubbleSound(); setIsRemindersOpen(true); }}
+            className="p-3 rounded-xl hover:bg-white/10 text-white/50 hover:text-white transition-all"
+            title="Tous les événements"
+          >
+            <ListTodo size={24} />
           </button>
 
           <button
@@ -334,6 +367,13 @@ function App() {
       <NotificationToast
         notification={toastNotification}
         onClose={() => setToastNotification(null)}
+      />
+
+      <RemindersModal
+        isOpen={isRemindersOpen}
+        onClose={() => setIsRemindersOpen(false)}
+        events={events}
+        onDeleteEvent={handleDeleteEvent}
       />
 
       <ContextMenu

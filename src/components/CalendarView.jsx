@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
 import { getHolidays } from '../utils/holidays';
 import DayDetails from './DayDetails';
 import { playBubbleSound } from '../utils/sound';
+import { getOccurrencesOnDate } from '../utils/eventUtils';
 
 const DAYS = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
 const MONTHS = [
@@ -69,8 +70,7 @@ export default function CalendarView({ events, onAddEvent, onEditEvent, onDelete
     };
 
     const getEventsForDay = (date) => {
-        const dateStr = date.toDateString();
-        return events.filter(e => new Date(e.date).toDateString() === dateStr);
+        return getOccurrencesOnDate(events, date);
     };
 
     // Navigation
@@ -224,7 +224,8 @@ export default function CalendarView({ events, onAddEvent, onEditEvent, onDelete
                                 // Performance: Avoid full filter for every day in year view if possible, or accept it for now.
                                 // 365 iterations * N events might be slow if many events.
                                 // Minimal indicator:
-                                const hasEvent = events.some(e => new Date(e.date).toDateString() === dateStr);
+                                const targetDate = new Date(currentDate.getFullYear(), monthIndex, dayNum);
+                                const hasEvent = getOccurrencesOnDate(events, targetDate).length > 0;
                                 
                                 return (
                                     <div key={dayNum} className={`aspect-square flex items-center justify-center rounded-sm ${hasEvent ? 'bg-white/20' : ''}`}>
@@ -457,7 +458,7 @@ export default function CalendarView({ events, onAddEvent, onEditEvent, onDelete
 
     const { events: selectedEvents, holiday: selectedHoliday } = useMemo(() => {
         const day = selectedDate.getDate();
-        const dEvents = events.filter(e => new Date(e.date).toDateString() === selectedDate.toDateString());
+        const dEvents = getOccurrencesOnDate(events, selectedDate);
         
         let dHoliday = null;
         if (showHolidays) {
