@@ -267,9 +267,13 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave, onPre
     if (!isOpen) return null;
 
     const searchUnsplash = async () => {
-        const activeUnsplashKey = localSettings.unsplashApiKey || import.meta.env.VITE_UNSPLASH_ACCESS_KEY;
-        if (!unsplashQuery.trim() || !activeUnsplashKey) {
-            setUnsplashError("Veuillez configurer la clé API Unsplash et un terme de recherche.");
+        const activeUnsplashKey = import.meta.env.VITE_UNSPLASH_ACCESS_KEY;
+        if (!unsplashQuery.trim()) {
+            setUnsplashError("Veuillez entrer un terme de recherche.");
+            return;
+        }
+        if (!activeUnsplashKey) {
+            setUnsplashError("La clé API Unsplash n'est pas configurée dans l'environnement.");
             return;
         }
         setIsSearchingUnsplash(true);
@@ -299,7 +303,7 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave, onPre
     };
 
     const handleApplyUnsplash = async (img) => {
-        const activeUnsplashKey = localSettings.unsplashApiKey || import.meta.env.VITE_UNSPLASH_ACCESS_KEY;
+        const activeUnsplashKey = import.meta.env.VITE_UNSPLASH_ACCESS_KEY;
         const updated = {
             ...localSettings,
             appBackground: img.urls.full,
@@ -718,26 +722,6 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave, onPre
                                     </div>
 
                                     <div className="space-y-4">
-                                        {!(import.meta.env.VITE_UNSPLASH_ACCESS_KEY) && (
-                                            <div className="space-y-2 text-left">
-                                                <label className="text-sm font-medium text-white">Clé API Unsplash (Obligatoire)</label>
-                                                <input
-                                                    type="password"
-                                                    value={localSettings.unsplashApiKey || ''}
-                                                    onChange={(e) => handleChange('unsplashApiKey', e.target.value)}
-                                                    placeholder="Access Key..."
-                                                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-teal-500/50 transition-all"
-                                                />
-                                                <div className="text-xs text-gray-500">
-                                                    <ol className="list-decimal ml-4 mt-2 mb-1 space-y-1">
-                                                        <li>Inscrivez-vous gratuitement sur <a href="https://unsplash.com/developers" target="_blank" rel="noreferrer" className="text-teal-400 hover:underline">Unsplash Developers</a>.</li>
-                                                        <li>Cliquez sur <strong>New Application</strong>.</li>
-                                                        <li>Acceptez les conditions, nommez votre app, et copiez la clé indiquée sous <strong>Access Key</strong>.</li>
-                                                    </ol>
-                                                </div>
-                                            </div>
-                                        )}
-
                                         <div className="space-y-2">
                                             <label className="text-sm font-medium text-white">Rechercher une image</label>
                                             <div className="flex gap-2">
