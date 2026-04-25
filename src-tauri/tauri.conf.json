@@ -4,12 +4,13 @@
   "version": "0.1.0",
   "identifier": "com.darkii.caltemp",
   "build": {
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": "deno task dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "deno task build",
     "frontendDist": "../dist"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
         "title": "caltemp",
@@ -23,28 +24,31 @@
       "csp": null
     }
   },
-  "plugins": {
-    "updater": {
+    "plugins": {
+      "updater": {
       "endpoints": [
         "https://github.com/darkiifr/Caltemp/releases/latest/download/latest.json"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDNDRkE2MTkzRjkzNTQyQTMKUldTalFqWDVrMkg2UENyemtJOWZYNnFrY1JXemNMak54dllFNjJUM0JOOG1QYkZudllJZlphMHAK"
     }
   },
-  "bundle": {
-    "active": true,
-    "targets": "all",
-    "icon": [
-      "icons/32x32.png",
-      "icons/128x128.png",
-      "icons/128x128@2x.png",
-      "icons/icon.icns",
-      "icons/icon.ico"
-    ],
-    "windows": {
-      "nsis": {
-        "languages": ["French"]
+    "bundle": {
+      "active": true,
+      "targets": "all",
+      "icon": [
+        "icons/32x32.png",
+        "icons/128x128.png",
+        "icons/128x128@2x.png",
+        "icons/icon.icns",
+        "icons/icon.ico"
+      ],
+      "macOS": {
+        "infoPlist": "Info.plist"
+      },
+      "windows": {
+        "nsis": {
+          "languages": ["French"]
+        }
       }
     }
-  }
 }

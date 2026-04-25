@@ -6,8 +6,13 @@
     "main"
   ],
   "permissions": [
-    "core:default",
-    "opener:default",
+    "http:default",
+    {
+      "identifier": "http:allow-fetch",
+      "allow": [
+        { "url": "https://openrouter.ai/**" }
+      ]
+    },
     "core:window:allow-minimize",
     "core:window:allow-maximize",
     "core:window:allow-close",
@@ -15,7 +20,6 @@
     "core:window:allow-start-dragging",
     "fs:default",
     "fs:allow-app-write-recursive",
-    "http:default",
     "notification:default",
     "os:default",
     "shell:allow-open",

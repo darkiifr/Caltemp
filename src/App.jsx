@@ -153,9 +153,11 @@ function App() {
     }
   }, [settings.notifications]);
 
-  // Check for reminders every minute
+  // Check for reminders dynamically to save battery when in background
   useEffect(() => {
-    const interval = setInterval(() => {
+    let timeoutId;
+    
+    const checkReminders = () => {
       const now = new Date();
       const updatedEvents = events.map(event => {
         if (event.reminder) {
@@ -200,9 +202,17 @@ function App() {
         setEvents(updatedEvents);
         saveEvents(updatedEvents); // Persist notification state
       }
-    }, 5000); // Check every 5 seconds for precision
-    return () => clearInterval(interval);
-  }, [events, isLoaded, settings, notify]); // Added settings dependency
+
+      // Schedule next run: 5 seconds if visible, 60 seconds if in background
+      const delay = document.hidden ? 60000 : 5000;
+      timeoutId = setTimeout(checkReminders, delay);
+    };
+
+    // Initial call
+    timeoutId = setTimeout(checkReminders, 5000);
+
+    return () => clearTimeout(timeoutId);
+  }, [events, isLoaded, settings, notify]);
 
   const handleAddEvent = (date) => {
     setSelectedDate(date);
@@ -247,15 +257,41 @@ function App() {
     });
   };
 
+  const isBackgroundActive = currentSettings.backgroundEnabled !== false && currentSettings.appBackground;
+  
+  const appBgStyle = isBackgroundActive ? {
+    backgroundImage: `url(${currentSettings.appBackground})`,
+    backgroundSize: 'cover',
+    backgroundPosition: 'center'
+  } : {};
+
+  // Background state for the main outer div
+  // If we have a window effect (vibrancy/mica), we MUST be transparent.
+  // Otherwise, if background is disabled, we show solid dark.
+  const isTransparent = (currentSettings.windowEffect && currentSettings.windowEffect !== 'none') || isBackgroundActive;
+
   return (
     <div
       onContextMenu={handleContextMenu}
-      className={`h-screen w-screen flex flex-col text-white overflow-hidden border border-white/10 ${(!currentSettings.windowEffect || currentSettings.windowEffect !== 'none') ? 'bg-transparent' : 'bg-[#121212]'
-        }`}
+      className={`h-screen w-screen flex flex-col text-white overflow-hidden border border-white/10 transition-colors duration-500 ${
+        isTransparent ? 'bg-transparent' : 'bg-[#0a0a0a]'
+      }`}
     >
-      <Titlebar style={currentSettings.titlebarStyle || 'macos'} osType={osType} />
+      {/* App Background Image Container */}
+      {isBackgroundActive && (
+        <>
+          <div 
+            className="fixed inset-0 z-[-1] transition-all duration-1000 bg-cover bg-center bg-no-repeat opacity-40 blur-[2px]"
+            style={appBgStyle}
+          />
+          <div className="fixed inset-0 z-[-1] bg-black/40 backdrop-blur-[1px]" />
+        </>
+      )}
+      
+      <div className="relative z-10 flex flex-col h-full w-full">
+        <Titlebar style={currentSettings.titlebarStyle || 'macos'} osType={osType} />
 
-      <div className="flex-1 flex overflow-hidden">
+        <div className="flex-1 flex overflow-hidden">
         {/* Minimal Sidebar */}
         <div className="w-16 bg-[#1e1e1e]/50 backdrop-blur-md border-r border-white/5 flex flex-col items-center py-6 gap-6 z-20">
           <button
@@ -291,34 +327,44 @@ function App() {
           </button>
         </div>
 
-        {/* Main Content */}
-        <div className={`flex-1 relative ${(!currentSettings.windowEffect || currentSettings.windowEffect !== 'none')
-          ? 'bg-transparent'
-          : 'bg-gradient-to-br from-[#121212] to-[#1a1a1a]'
+        {/* Main Content & Dexter Flex Container */}
+          {/* Main Content Area: Switch between Calendar and Dexter */}
+          <div className={`flex-1 flex overflow-hidden relative ${
+            isTransparent ? 'bg-transparent' : 'bg-gradient-to-br from-[#0a0a0a] to-[#121212]'
           }`}>
-          <CalendarView
-            events={events}
-            showHolidays={currentSettings.showHolidays !== false}
-            showNamedays={currentSettings.showNamedays !== false}
-            onAddEvent={handleAddEvent}
-            onEditEvent={(event) => {
-              setSelectedEvent(event);
-              setIsEventModalOpen(true);
-            }}
-            onDeleteEvent={handleDeleteEvent}
-          />
-
-          {/* Dexter Panel (Overlay) */}
-          {isDexterOpen && (
-            <Dexter
-              isOpen={isDexterOpen}
-              onClose={() => setIsDexterOpen(false)}
-              settings={currentSettings}
-              onAddEvent={handleSaveEvent}
-            />
-          )}
-        </div>
+            
+            {isDexterOpen ? (
+              <Dexter
+                isOpen={isDexterOpen}
+                onClose={() => setIsDexterOpen(false)}
+                settings={currentSettings}
+                onAddEvent={handleSaveEvent}
+              />
+            ) : (
+              <div className="flex-1 flex flex-col overflow-hidden relative transition-all duration-300">
+                <CalendarView
+                  events={events}
+                  showHolidays={currentSettings.showHolidays !== false}
+                  showNamedays={currentSettings.showNamedays !== false}
+                  onAddEvent={handleAddEvent}
+                  onEditEvent={(event) => {
+                    setSelectedEvent(event);
+                    setIsEventModalOpen(true);
+                  }}
+                  onDeleteEvent={handleDeleteEvent}
+                />
+              </div>
+            )}
+          </div>
       </div>
+
+      {currentSettings.unsplashAttribution && (
+        <div className="absolute bottom-4 left-20 z-20">
+          <span className="text-xs text-white/50 bg-black/40 px-2 py-1 rounded-md backdrop-blur-md border border-white/5 shadow-lg">
+            Photo by <a href={`${currentSettings.unsplashAttribution.link}?utm_source=caltemp&utm_medium=referral`} target="_blank" rel="noreferrer" className="text-white hover:underline">{currentSettings.unsplashAttribution.name}</a> on <a href="https://unsplash.com/?utm_source=caltemp&utm_medium=referral" target="_blank" rel="noreferrer" className="text-white hover:underline">Unsplash</a>
+          </span>
+        </div>
+      )}
 
       <EventModal
         isOpen={isEventModalOpen}
@@ -332,6 +378,7 @@ function App() {
       <SettingsModal
         isOpen={isSettingsOpen}
         events={events}
+        osType={osType}
         onImportEvents={handleImportEvents}
         onClose={() => {
           setPreviewSettings(null);
@@ -383,6 +430,7 @@ function App() {
         onClose={() => setContextMenu({ ...contextMenu, visible: false })}
         onSettings={() => setIsSettingsOpen(true)}
       />
+    </div>
     </div>
   );
 }

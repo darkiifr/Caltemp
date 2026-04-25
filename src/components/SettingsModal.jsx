@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Monitor, Cpu, Info, Check, RefreshCw, Layout, Download, Upload, Coffee } from 'lucide-react';
+import { X, Monitor, Cpu, Info, Check, RefreshCw, Layout, Download, Upload, Coffee, Image as ImageIcon, Search } from 'lucide-react';
 import { getVersion } from '@tauri-apps/plugin-app';
 import { check } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
@@ -22,7 +22,7 @@ const DEFAULT_MODELS = [
     { id: 'google/gemini-pro', name: 'Gemini Pro' },
 ];
 
-export default function SettingsModal({ isOpen, onClose, settings, onSave, onPreview, events, onImportEvents }) {
+export default function SettingsModal({ isOpen, onClose, settings, onSave, onPreview, events, onImportEvents, osType }) {
     const [activeTab, setActiveTab] = useState('general');
     const [appVersion, setAppVersion] = useState('Unknown');
     const [updateStatus, setUpdateStatus] = useState(null);
@@ -30,10 +30,19 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave, onPre
     const [showUpdateModal, setShowUpdateModal] = useState(false);
     const [availableUpdate, setAvailableUpdate] = useState(null);
     const [newModelInput, setNewModelInput] = useState('');
+    
+    // Unsplash State
+    const [unsplashQuery, setUnsplashQuery] = useState('');
+    const [unsplashResults, setUnsplashResults] = useState([]);
+    const [isSearchingUnsplash, setIsSearchingUnsplash] = useState(false);
+    const [unsplashError, setUnsplashError] = useState('');
+    const [hasSearched, setHasSearched] = useState(false);
+
+    const displayOsName = osType === 'macos' ? 'macOS' : (osType === 'linux' ? 'Linux' : 'Windows');
 
     useEffect(() => {
         if (isOpen) {
-            // eslint-disable-next-line react-hooks/set-state-in-effect
+
             setLocalSettings({ ...settings, customModels: settings.customModels || [] });
 
             // Check autostart status
@@ -64,29 +73,40 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave, onPre
     }, [isOpen, settings]);
 
     const handleChange = (key, value) => {
-        const newSettings = { ...localSettings, [key]: value };
-        setLocalSettings(newSettings);
+        setLocalSettings(prev => {
+            const newSettings = { ...prev, [key]: value };
+            
+            // Live preview
+            if (onPreview) {
+                onPreview(newSettings);
+            }
 
-        // Live preview
-        if (onPreview) {
-            onPreview(newSettings);
-        }
+            // Apply immediate effects for window style only (preview)
+            if (key === 'windowEffect') {
+                invoke('set_window_effect', { effect: value });
+            }
 
-        // Apply immediate effects for window style only (preview)
-        if (key === 'windowEffect') {
-            invoke('set_window_effect', { effect: value });
-        }
+            if (key === 'autoStart') {
+                (async () => {
+                    try {
+                        if (value) await enable();
+                        else await disable();
+                    } catch (e) {
+                        console.error('Failed to toggle autostart', e);
+                    }
+                })();
+            }
 
-        if (key === 'autoStart') {
-            (async () => {
-                try {
-                    if (value) await enable();
-                    else await disable();
-                } catch (e) {
-                    console.error('Failed to toggle autostart', e);
-                }
-            })();
-        }
+            return newSettings;
+        });
+    };
+
+    const handleMultipleChanges = (changes) => {
+        setLocalSettings(prev => {
+            const newSettings = { ...prev, ...changes };
+            if (onPreview) onPreview(newSettings);
+            return newSettings;
+        });
     };
 
     const handleSave = () => {
@@ -246,11 +266,67 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave, onPre
 
     if (!isOpen) return null;
 
+    const searchUnsplash = async () => {
+        const activeUnsplashKey = localSettings.unsplashApiKey || import.meta.env.VITE_UNSPLASH_ACCESS_KEY;
+        if (!unsplashQuery.trim() || !activeUnsplashKey) {
+            setUnsplashError("Veuillez configurer la clé API Unsplash et un terme de recherche.");
+            return;
+        }
+        setIsSearchingUnsplash(true);
+        setUnsplashError('');
+        setHasSearched(false);
+        try {
+            const res = await fetch(`https://api.unsplash.com/search/photos?query=${encodeURIComponent(unsplashQuery)}&per_page=12`, {
+                headers: {
+                    Authorization: `Client-ID ${activeUnsplashKey}`
+                }
+            });
+            const data = await res.json();
+            if (data.results && data.results.length === 0) {
+                setUnsplashError("Aucun résultat trouvé pour votre recherche.");
+                setUnsplashResults([]);
+            } else if (data.errors) {
+                setUnsplashError(data.errors[0]);
+            } else {
+                setUnsplashResults(data.results || []);
+            }
+        } catch {
+            setUnsplashError("Erreur lors de la recherche. Vérifiez votre connexion et clé API.");
+        } finally {
+            setIsSearchingUnsplash(false);
+            setHasSearched(true);
+        }
+    };
+
+    const handleApplyUnsplash = async (img) => {
+        const activeUnsplashKey = localSettings.unsplashApiKey || import.meta.env.VITE_UNSPLASH_ACCESS_KEY;
+        const updated = {
+            ...localSettings,
+            appBackground: img.urls.full,
+            backgroundEnabled: true, // Auto-enable if applying an image
+            unsplashAttribution: {
+                name: img.user.name,
+                link: img.user.links.html
+            }
+        };
+        setLocalSettings(updated);
+        if (onPreview) onPreview(updated);
+        try {
+            // Unsplash Guideline: Trigger download
+            await fetch(img.links.download_location, {
+                headers: { Authorization: `Client-ID ${activeUnsplashKey}` }
+            });
+        } catch(e) {
+            console.error("Failed to trigger Unsplash download:", e);
+        }
+    };
+
     const tabs = [
         { id: 'general', label: 'Général', icon: Monitor },
         { id: 'appearance', label: 'Apparence', icon: Layout },
         { id: 'sounds', label: 'Sons', icon: Volume2 },
         { id: 'ai', label: 'Intelligence Artificielle', icon: Cpu },
+        { id: 'background', label: 'Fond de l\'app', icon: ImageIcon },
         { id: 'about', label: 'À propos', icon: Info },
     ];
 
@@ -314,7 +390,7 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave, onPre
                                         <label className="flex items-center justify-between p-4 bg-white/5 rounded-xl cursor-pointer hover:bg-white/10 transition-colors">
                                             <div>
                                                 <div className="font-medium text-white">Démarrage automatique</div>
-                                                <div className="text-sm text-gray-400">Lancer Caltemp au démarrage de Windows</div>
+                                                <div className="text-sm text-gray-400">Lancer Caltemp au démarrage de {displayOsName}</div>
                                             </div>
                                             <div className={`w-12 h-6 rounded-full transition-colors relative ${localSettings.autoStart ? 'bg-blue-600' : 'bg-gray-600'}`} onClick={() => handleChange('autoStart', !localSettings.autoStart)}>
                                                 <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${localSettings.autoStart ? 'left-7' : 'left-1'}`} />
@@ -613,6 +689,123 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave, onPre
                                 </div>
                             )}
 
+                            {/* --- BACKGROUND (UNSPLASH) --- */}
+                            {activeTab === 'background' && (
+                                <div className="space-y-6">
+                                    <div className="p-4 bg-teal-500/10 border border-teal-500/20 rounded-xl">
+                                        <div className="flex gap-3">
+                                            <ImageIcon className="w-5 h-5 text-teal-400 shrink-0" />
+                                            <div>
+                                                <h4 className="font-medium text-teal-400">Fonds d&apos;écran Unsplash</h4>
+                                                <p className="text-sm text-teal-300/70 mt-1">
+                                                    Recherchez et appliquez de magnifiques images en fond pour sublimer votre calendrier.
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="p-4 bg-white/5 rounded-xl border border-white/5 flex items-center justify-between">
+                                        <div>
+                                            <h4 className="font-medium text-white">Activer le fond d&apos;écran</h4>
+                                            <p className="text-xs text-gray-400">Afficher une image Unsplash ou une couleur personnalisée</p>
+                                        </div>
+                                        <div 
+                                            className={`w-12 h-6 rounded-full transition-colors relative cursor-pointer ${localSettings.backgroundEnabled !== false ? 'bg-teal-600' : 'bg-gray-600'}`} 
+                                            onClick={() => handleChange('backgroundEnabled', localSettings.backgroundEnabled === false)}
+                                        >
+                                            <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${localSettings.backgroundEnabled !== false ? 'left-7' : 'left-1'}`} />
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-4">
+                                        {!(import.meta.env.VITE_UNSPLASH_ACCESS_KEY) && (
+                                            <div className="space-y-2 text-left">
+                                                <label className="text-sm font-medium text-white">Clé API Unsplash (Obligatoire)</label>
+                                                <input
+                                                    type="password"
+                                                    value={localSettings.unsplashApiKey || ''}
+                                                    onChange={(e) => handleChange('unsplashApiKey', e.target.value)}
+                                                    placeholder="Access Key..."
+                                                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-teal-500/50 transition-all"
+                                                />
+                                                <div className="text-xs text-gray-500">
+                                                    <ol className="list-decimal ml-4 mt-2 mb-1 space-y-1">
+                                                        <li>Inscrivez-vous gratuitement sur <a href="https://unsplash.com/developers" target="_blank" rel="noreferrer" className="text-teal-400 hover:underline">Unsplash Developers</a>.</li>
+                                                        <li>Cliquez sur <strong>New Application</strong>.</li>
+                                                        <li>Acceptez les conditions, nommez votre app, et copiez la clé indiquée sous <strong>Access Key</strong>.</li>
+                                                    </ol>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        <div className="space-y-2">
+                                            <label className="text-sm font-medium text-white">Rechercher une image</label>
+                                            <div className="flex gap-2">
+                                                <input
+                                                    type="text"
+                                                    value={unsplashQuery}
+                                                    onChange={(e) => {
+                                                        setUnsplashQuery(e.target.value);
+                                                        setHasSearched(false);
+                                                    }}
+                                                    onKeyDown={(e) => e.key === 'Enter' && searchUnsplash()}
+                                                    placeholder="paysage, montagne, abstrait..."
+                                                    className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-teal-500/50 transition-all"
+                                                />
+                                                <button
+                                                    onClick={searchUnsplash}
+                                                    disabled={isSearchingUnsplash}
+                                                    className="px-4 bg-teal-600 hover:bg-teal-500 disabled:opacity-50 text-white rounded-xl transition-colors flex items-center gap-2"
+                                                >
+                                                    {isSearchingUnsplash ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+                                                </button>
+                                            </div>
+                                            {unsplashError && <p className="text-sm text-red-400 mt-2 bg-red-400/5 p-3 rounded-lg border border-red-400/10">{unsplashError}</p>}
+                                            {unsplashResults.length === 0 && !isSearchingUnsplash && hasSearched && !unsplashError && (
+                                                <div className="text-center py-10 bg-white/5 rounded-xl border border-dashed border-white/10 mt-4">
+                                                    <Search className="w-8 h-8 text-gray-600 mx-auto mb-2 opacity-50" />
+                                                    <p className="text-gray-400 text-sm">Aucun fond d&apos;écran trouvé pour &quot;{unsplashQuery}&quot;</p>
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        <div className="pt-4 grid grid-cols-3 gap-3">
+                                            {unsplashResults.map(img => (
+                                                <button
+                                                    key={img.id}
+                                                    onClick={() => handleApplyUnsplash(img)}
+                                                    className={`relative aspect-video rounded-xl overflow-hidden border-2 transition-all group ${localSettings.appBackground === img.urls.full ? 'border-teal-500 shadow-[0_0_15px_rgba(20,184,166,0.3)]' : 'border-transparent hover:border-white/20'}`}
+                                                >
+                                                    <img src={img.urls.small} alt={img.alt_description} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy" />
+                                                    {localSettings.appBackground === img.urls.full && (
+                                                        <div className="absolute inset-0 bg-teal-500/20 flex items-center justify-center backdrop-blur-sm">
+                                                            <Check className="w-6 h-6 text-white drop-shadow-md" />
+                                                        </div>
+                                                    )}
+                                                </button>
+                                            ))}
+                                        </div>
+
+                                        {localSettings.appBackground && (
+                                            <div className="pt-4 border-t border-white/5 flex justify-end">
+                                                <button
+                                                    onClick={() => {
+                                                        handleMultipleChanges({
+                                                            appBackground: null,
+                                                            unsplashAttribution: null,
+                                                            backgroundEnabled: false
+                                                        });
+                                                    }}
+                                                    className="px-4 py-2 text-sm text-red-400 hover:bg-red-500/10 rounded-xl transition-colors"
+                                                >
+                                                    Retirer le fond d&apos;écran
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+
                             {/* --- ABOUT --- */}
                             {activeTab === 'about' && (
                                 <div className="text-center space-y-6 py-8">
@@ -663,7 +856,7 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave, onPre
                         </div>
                     </div>
                 </div>
-            </div >
+            </div>
 
             <UpdateModal
                 isOpen={showUpdateModal}

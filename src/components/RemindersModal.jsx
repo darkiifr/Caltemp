@@ -25,7 +25,6 @@ export default function RemindersModal({ isOpen, onClose, events, onDeleteEvent 
 
         // Sort single events by date (newest first or upcoming first?)
         // Let's do upcoming first, if past then put to bottom
-        const now = new Date();
         single.sort((a, b) => {
             const dateA = new Date(a.date);
             const dateB = new Date(b.date);
