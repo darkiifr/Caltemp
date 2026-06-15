@@ -29,10 +29,10 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install Node.js
-        uses: actions/setup-node@v5
+      - name: Install Deno
+        uses: denoland/setup-deno@v2
         with:
-          node-version: 20
+          deno-version: v2.x
 
       - name: Configure Git
         run: |
@@ -40,12 +40,12 @@ jobs:
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Bump Version
-        run: node scripts/bump-version.mjs --type=${{ github.event.inputs.bump_type }}
+        run: deno run -A scripts/bump-version.mjs --type=${{ github.event.inputs.bump_type }}
 
       - name: Get New Version
         id: get_version
         run: |
-          NEW_VERSION=$(node -p "require('./package.json').version")
+          NEW_VERSION=$(deno eval 'console.log(JSON.parse(Deno.readTextFileSync("./package.json")).version)')
           echo "new_tag=v$NEW_VERSION" >> $GITHUB_OUTPUT
           echo "NEW_VERSION=$NEW_VERSION" >> $GITHUB_ENV
 
@@ -80,16 +80,21 @@ jobs:
             rust_targets: "aarch64-pc-windows-msvc"
 
     runs-on: ${{ matrix.platform }}
+    env:
+      VITE_UNSPLASH_ACCESS_KEY: ${{ secrets.VITE_UNSPLASH_ACCESS_KEY }}
+      VITE_UNSPLASH_SECRET_KEY: ${{ secrets.VITE_UNSPLASH_SECRET_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
         with:
           ref: ${{ needs.bump-version.outputs.new_tag || github.ref_name }}
 
-      - name: Install Node.js
-        uses: actions/setup-node@v5
+      - name: Install Deno
+        uses: denoland/setup-deno@v2
         with:
-          node-version: 20
+          deno-version: v2.x
 
       - name: Sync Version (if tag push)
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
@@ -103,24 +108,21 @@ jobs:
             VERSION=${VERSION#.}
             echo "Syncing version to $VERSION"
             # Update package.json
-            node -e "
-              const fs = require('fs');
-              const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            deno eval "
+              const pkg = JSON.parse(Deno.readTextFileSync('package.json'));
               pkg.version = '$VERSION';
-              fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2));
+              Deno.writeTextFileSync('package.json', JSON.stringify(pkg, null, 2));
             "
             # Update tauri.conf.json
-            node -e "
-              const fs = require('fs');
-              const tauriConf = JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json', 'utf8'));
+            deno eval "
+              const tauriConf = JSON.parse(Deno.readTextFileSync('src-tauri/tauri.conf.json'));
               tauriConf.version = '$VERSION';
-              fs.writeFileSync('src-tauri/tauri.conf.json', JSON.stringify(tauriConf, null, 2));
+              Deno.writeTextFileSync('src-tauri/tauri.conf.json', JSON.stringify(tauriConf, null, 2));
             "
             # Update public/version.json for runtime check
-            node -e "
-              const fs = require('fs');
+            deno eval "
               const versionData = { version: '$VERSION' };
-              fs.writeFileSync('public/version.json', JSON.stringify(versionData, null, 2));
+              Deno.writeTextFileSync('public/version.json', JSON.stringify(versionData, null, 2));
             "
           else
             echo "Tag $TAG_NAME does not start with 'v', skipping version sync."
@@ -138,12 +140,14 @@ jobs:
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
       - name: Install frontend dependencies
-        run: npm install
+        run: deno install
 
       - name: Build the app
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VITE_UNSPLASH_ACCESS_KEY: ${{ secrets.VITE_UNSPLASH_ACCESS_KEY }}
+          VITE_UNSPLASH_SECRET_KEY: ${{ secrets.VITE_UNSPLASH_SECRET_KEY }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:

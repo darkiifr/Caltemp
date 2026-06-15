@@ -1,0 +1,12 @@
+{
+  "identifier": "allow-openrouter",
+  "description": "Permit access to OpenRouter API",
+  "permissions": [
+    {
+      "identifier": "http:allow-fetch",
+      "allow": [
+        { "url": "https://openrouter.ai/**" }
+      ]
+    }
+  ]
+}

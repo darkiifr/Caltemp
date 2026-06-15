@@ -87,6 +87,16 @@ export function parseICS(icsContent) {
                 // Handle cases with timezone params like DTSTART;TZID=...:
                 const datePart = line.split(':')[1];
                 currentEvent.date = parseDate(datePart);
+            } else if (line.startsWith('RRULE:')) {
+                const rules = line.substring(6).split(';');
+                const freqRule = rules.find(r => r.startsWith('FREQ='));
+                if (freqRule) {
+                    const freq = freqRule.substring(5).toUpperCase();
+                    if (freq === 'DAILY') currentEvent.recurrence = 'daily';
+                    else if (freq === 'WEEKLY') currentEvent.recurrence = 'weekly';
+                    else if (freq === 'MONTHLY') currentEvent.recurrence = 'monthly';
+                    else if (freq === 'YEARLY') currentEvent.recurrence = 'yearly';
+                }
             }
         }
     });

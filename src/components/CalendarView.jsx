@@ -11,14 +11,6 @@ const MONTHS = [
     'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'
 ];
 
-const getWeekNumber = (d) => {
-    d = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
-    d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay()||7));
-    var yearStart = new Date(Date.UTC(d.getUTCFullYear(),0,1));
-    var weekNo = Math.ceil(( ( (d - yearStart) / 86400000) + 1)/7);
-    return weekNo;
-};
-
 export default function CalendarView({ events, onAddEvent, onEditEvent, onDeleteEvent, showHolidays = true, showNamedays = true }) {
     const [currentDate, setCurrentDate] = useState(new Date());
     const [selectedDate, setSelectedDate] = useState(new Date());
@@ -27,9 +19,13 @@ export default function CalendarView({ events, onAddEvent, onEditEvent, onDelete
     const [now, setNow] = useState(new Date());
     const dayScrollRef = useRef(null);
 
-    // Update 'now' every minute for the red line
+    // Update 'now' every minute for the red line, only if the app is not hidden
     useEffect(() => {
-        const interval = setInterval(() => setNow(new Date()), 60000);
+        const interval = setInterval(() => {
+            if (!document.hidden) {
+                setNow(new Date());
+            }
+        }, 60000);
         return () => clearInterval(interval);
     }, []);
 
@@ -144,16 +140,16 @@ export default function CalendarView({ events, onAddEvent, onEditEvent, onDelete
                     </h2>
                 </div>
                 <div className="flex gap-2 items-center">
-                    <div className="bg-white/10 rounded-lg p-1 flex items-center mr-2">
+                    <div className="bg-white/5 p-1 rounded-xl flex items-center mr-2 border border-white/5 shadow-inner">
                         {['year', 'month', 'week', 'day'].map((v) => (
                            <button
                                 key={v}
                                 onClick={() => setView(v)}
-                                className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${
-                                    view === v ? 'bg-blue-500 text-white shadow-sm' : 'text-white/50 hover:text-white hover:bg-white/5'
+                                className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-all duration-200 ${
+                                    view === v ? 'bg-white/15 text-white shadow-sm' : 'text-white/40 hover:text-white/80 hover:bg-white/5'
                                 }`}
                            >
-                               {v === 'year' ? 'An' : v === 'month' ? 'Mois' : v === 'week' ? 'Sem' : 'Jour'}
+                               {v === 'year' ? 'Année' : v === 'month' ? 'Mois' : v === 'week' ? 'Semaine' : 'Jour'}
                            </button> 
                         ))}
                     </div>
@@ -219,8 +215,6 @@ export default function CalendarView({ events, onAddEvent, onEditEvent, onDelete
                             {/* Days */}
                             {Array.from({ length: daysInMonth }).map((_, i) => {
                                 const dayNum = i + 1;
-                                // Basic check for events
-                                const dateStr = new Date(currentDate.getFullYear(), monthIndex, dayNum).toDateString();
                                 // Performance: Avoid full filter for every day in year view if possible, or accept it for now.
                                 // 365 iterations * N events might be slow if many events.
                                 // Minimal indicator:
@@ -246,61 +240,72 @@ export default function CalendarView({ events, onAddEvent, onEditEvent, onDelete
         const totalRows = Math.ceil(totalSlots / 7);
 
         return (
-            <div className={`flex flex-col gap-4 p-4 overflow-y-auto h-full ${direction === 'right' ? 'animate-month-right' : 'animate-month-left'}`}>
-                {Array.from({ length: totalRows }).map((_, rowIndex) => {
-                    // Calculate start of the week (Sunday)
-                    const startOfWeek = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1 - firstDay + (rowIndex * 7));
-                    const endOfWeek = new Date(startOfWeek);
-                    endOfWeek.setDate(startOfWeek.getDate() + 6);
+            <div className={`flex flex-col h-full gap-2 p-4 overflow-hidden ${direction === 'right' ? 'animate-month-right' : 'animate-month-left'}`}>
+                {/* Days Header */}
+                <div className="grid grid-cols-7 gap-2 mb-2 shrink-0">
+                    {DAYS.map((day, i) => (
+                        <div key={i} className="text-center text-sm font-semibold text-white/50">{day}</div>
+                    ))}
+                </div>
 
-                    // Calculate week number using Thursday
-                    const checkDate = new Date(startOfWeek);
-                    checkDate.setDate(checkDate.getDate() + 4);
-                    const weekNum = getWeekNumber(checkDate);
-                    
-                    // Check if current week (contains today)
-                    const today = new Date();
-                    const isCurrentWeek = today >= startOfWeek && today <= endOfWeek;
+                {/* Calendar Grid */}
+                <div className="flex-1 grid grid-cols-7 gap-2 overflow-y-auto custom-scrollbar" style={{ gridTemplateRows: `repeat(${totalRows}, minmax(0, 1fr))` }}>
+                    {Array.from({ length: totalRows * 7 }).map((_, i) => {
+                        const dayNumber = i - firstDay + 1;
+                        const isCurrentMonth = dayNumber > 0 && dayNumber <= days;
+                        
+                        const date = new Date(currentDate.getFullYear(), currentDate.getMonth(), dayNumber);
+                        const isTodayDate = isCurrentMonth && isToday(date);
+                        const isSelectedDate = isCurrentMonth && isSameDay(date, selectedDate);
+                        
+                        // Check events
+                        const dayEvents = isCurrentMonth ? getEventsForDay(date) : [];
 
-                    return (
-                        <div 
-                            key={rowIndex}
-                            onClick={() => {
-                                playBubbleSound();
-                                // We zoom into the week. 
-                                // To act like "zoomIn", we often set view AND date.
-                                // We might want to set selectedDate to Monday or today if in range?
-                                // Let's simplify: Set date to startOfWeek (or keep it simple) and view to week.
-                                zoomIn(startOfWeek, 'week');
-                            }}
-                            className={`
-                                flex items-center justify-between p-6 rounded-2xl border cursor-pointer transition-all duration-200 group
-                                ${isCurrentWeek 
-                                    ? 'bg-blue-500/20 border-blue-500/50 hover:bg-blue-500/30' 
-                                    : 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20'}
-                            `}
-                        >
-                            <div className="flex items-center gap-4">
-                                <div className={`
-                                    w-12 h-12 flex items-center justify-center rounded-full text-xl font-bold
-                                    ${isCurrentWeek ? 'bg-blue-500 text-white' : 'bg-white/10 text-white/50 group-hover:bg-white/20 group-hover:text-white'}
-                                `}>
-                                    {weekNum}
-                                </div>
-                                <div className="flex flex-col">
-                                    <span className="text-lg font-semibold tracking-wide">Semaine {weekNum}</span>
-                                    <span className="text-sm text-white/50">
-                                        Du {startOfWeek.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })} au {endOfWeek.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })}
+                        return (
+                            <div 
+                                key={i}
+                                onClick={() => {
+                                    if (isCurrentMonth) {
+                                        setSelectedDate(date);
+                                    }
+                                }}
+                                onDoubleClick={() => {
+                                    if (isCurrentMonth) {
+                                        zoomIn(date, 'day');
+                                    }
+                                }}
+                                className={`
+                                    flex flex-col rounded-xl p-2 transition-all cursor-pointer border
+                                    ${!isCurrentMonth ? 'opacity-30 pointer-events-none border-transparent' : ''}
+                                    ${isSelectedDate ? 'bg-white/10 border-white/20' : 'bg-white/5 border-white/5 hover:bg-white/10'}
+                                    ${isTodayDate ? 'border-blue-500/50 shadow-[inset_0_0_15px_rgba(59,130,246,0.15)]' : ''}
+                                `}
+                            >
+                                <div className="flex justify-end mb-1">
+                                    <span className={`
+                                        w-7 h-7 flex items-center justify-center rounded-full text-sm font-semibold
+                                        ${isTodayDate ? 'bg-blue-500 text-white' : 'text-white/80'}
+                                    `}>
+                                        {date.getDate()}
                                     </span>
                                 </div>
+                                
+                                <div className="flex-1 flex flex-col gap-1 overflow-visible">
+                                     {dayEvents.slice(0, 3).map((ev, idx) => (
+                                         <div key={idx} className="bg-blue-500/20 border border-blue-500/30 text-blue-200 text-[10px] sm:text-xs px-1.5 py-0.5 rounded truncate shadow-sm">
+                                             {ev.title}
+                                         </div>
+                                     ))}
+                                     {dayEvents.length > 3 && (
+                                         <div className="text-[10px] text-white/50 font-medium px-1">
+                                             +{dayEvents.length - 3} autres
+                                         </div>
+                                     )}
+                                </div>
                             </div>
-                            
-                            <div className="opacity-0 group-hover:opacity-100 transition-opacity text-white/50">
-                                <ChevronRight />
-                            </div>
-                        </div>
-                    );
-                })}
+                        );
+                    })}
+                </div>
             </div>
         );
     };
@@ -310,7 +315,7 @@ export default function CalendarView({ events, onAddEvent, onEditEvent, onDelete
         startOfWeek.setDate(currentDate.getDate() - currentDate.getDay());
         
         return (
-            <div className={`grid grid-cols-7 gap-2 h-full overflow-hidden flex-1 ${direction === 'right' ? 'animate-month-right' : 'animate-month-left'}`}>
+            <div className={`flex h-full gap-3 overflow-hidden flex-1 ${direction === 'right' ? 'animate-month-right' : 'animate-month-left'}`}>
                 {Array.from({ length: 7 }).map((_, i) => {
                     const date = new Date(startOfWeek);
                     date.setDate(startOfWeek.getDate() + i);
@@ -322,25 +327,31 @@ export default function CalendarView({ events, onAddEvent, onEditEvent, onDelete
                         <div 
                             key={i} 
                             onClick={() => { setSelectedDate(date); }}
-                            className={`flex flex-col border-r h-full ${i === 6 ? 'border-r-0' : 'border-white/5'} ${isSelectedDate ? 'bg-white/5' : ''}`}
+                            className={`flex-1 flex flex-col rounded-2xl transition-colors ${isSelectedDate ? 'bg-white/5 shadow-inner' : 'hover:bg-white/[0.02]'}`}
                         >
-                            <div className={`text-center p-2 border-b border-white/5 flex flex-col items-center justify-center gap-2 h-20 ${isTodayDate ? 'text-blue-400' : 'text-white/50'}`}>
-                                <div className="text-xs uppercase font-medium">{DAYS[date.getDay()]}</div>
-                                <div className={`text-xl font-bold flex items-center justify-center w-8 h-8 rounded-full ${isTodayDate ? 'bg-blue-500 text-white' : ''}`}>
+                            <div className={`text-center py-4 flex flex-col items-center justify-center gap-1 ${isTodayDate ? 'text-blue-400' : 'text-white/70'}`}>
+                                <div className="text-sm font-medium">{DAYS[date.getDay()]}</div>
+                                <div className={`text-2xl font-bold flex items-center justify-center w-10 h-10 rounded-full transition-colors ${isTodayDate ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20' : ''}`}>
                                     {date.getDate()}
                                 </div>
                             </div>
+                            
                             <div className="flex-1 p-2 space-y-2 overflow-y-auto custom-scrollbar">
                                 {dayEvents.map(event => (
                                     <div 
                                         key={event.id} 
                                         onClick={(e) => { e.stopPropagation(); onEditEvent(event); }}
-                                        className="bg-white/10 p-2 rounded-lg text-xs hover:bg-white/20 cursor-pointer"
+                                        className="bg-[#3b82f6]/20 border border-[#3b82f6]/30 px-3 py-2 rounded-xl text-sm hover:bg-[#3b82f6]/30 cursor-pointer transition-colors shadow-sm"
                                     >
-                                        <div className="font-bold text-blue-300">{new Date(event.date).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
-                                        <div className="truncate">{event.title}</div>
+                                        <div className="font-semibold text-blue-200">
+                                            {event.title}
+                                        </div>
+                                        <div className="text-xs text-blue-300/80 font-medium mt-0.5">
+                                            {new Date(event.date).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                                        </div>
                                     </div>
                                 ))}
+                                
                                 <button
                                     onClick={(e) => {
                                         e.stopPropagation();
@@ -348,9 +359,9 @@ export default function CalendarView({ events, onAddEvent, onEditEvent, onDelete
                                         d.setHours(9, 0, 0, 0);
                                         onAddEvent(d);
                                     }}
-                                    className="w-full py-2 mt-2 border border-dashed border-white/10 rounded-lg text-white/30 text-xs hover:bg-white/5 hover:text-white/50 transition-colors"
+                                    className="w-full py-2 mt-1 flex items-center justify-center text-white/30 text-xs hover:text-white/80 hover:bg-white/10 rounded-xl transition-all opacity-0 group-hover:opacity-100 sm:opacity-100"
                                 >
-                                    + Ajouter
+                                    <Plus size={16} />
                                 </button>
                             </div>
                         </div>

@@ -30,7 +30,7 @@ export default function UpdateModal({ isOpen, onClose, onInstall, updateInfo, cu
                 {/* Content */}
                 <div className="p-6 max-h-[300px] overflow-y-auto custom-scrollbar">
                     <h4 className="text-sm font-medium text-gray-300 mb-3">Nouveautés</h4>
-                    <div className="text-sm text-gray-400 whitespace-pre-wrap leading-relaxed font-mono bg-black/20 p-3 rounded-lg border border-white/5">
+                    <div className="text-sm text-gray-400 whitespace-pre-wrap break-words leading-relaxed font-mono bg-black/20 p-3 rounded-lg border border-white/5">
                         {updateInfo.body || "Aucune note de version disponible."}
                     </div>
                 </div>

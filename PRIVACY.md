@@ -1,6 +1,6 @@
 # Privacy Policy
 
-**Last updated: March 27, 2026**
+**Last updated: April 26, 2026**
 
 ## Overview
 
@@ -23,9 +23,6 @@ All data created by the user (calendar events, preferences, etc.) is stored **lo
 
 Caltemp does not integrate any third-party tracking, advertising, or analytics services.
 
-## Code Signing
-
-Free code signing provided by [SignPath.io](https://signpath.io), certificate by [SignPath Foundation](https://signpath.org).
 
 ## Contact
 
