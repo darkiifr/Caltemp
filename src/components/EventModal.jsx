@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { X, Calendar, Clock, AlignLeft, Bell, Trash2 } from 'lucide-react';
+import { X, Calendar, Clock, AlignLeft, Bell, Trash2, Tag, ListChecks, Plus } from 'lucide-react';
 import CustomDatePicker from './CustomDatePicker';
 import CustomTimePicker from './CustomTimePicker';
 import CustomRecurrenceSelect from './CustomRecurrenceSelect';
+import { DEFAULT_CATEGORY_LEGEND, inferCategory } from '../domain/events';
+import CustomSelect from './CustomSelect';
 
-export default function EventModal({ isOpen, onClose, onSave, onDelete, initialDate, initialEvent }) {
+export default function EventModal({ isOpen, onClose, onSave, onDelete, initialDate, initialEvent, settings = {} }) {
     const [title, setTitle] = useState('');
     const [date, setDate] = useState('');
     const [time, setTime] = useState('12:00');
@@ -12,6 +14,18 @@ export default function EventModal({ isOpen, onClose, onSave, onDelete, initialD
     const [reminder, setReminder] = useState(false);
     const [recurrence, setRecurrence] = useState('none');
     const [isDeleting, setIsDeleting] = useState(false);
+    const [category, setCategory] = useState('perso');
+    const [durationMinutes, setDurationMinutes] = useState(60);
+    const [tags, setTags] = useState('');
+    const [todos, setTodos] = useState([]);
+    const [newTodo, setNewTodo] = useState('');
+
+    const categoryLegend = settings.categoryLegend || DEFAULT_CATEGORY_LEGEND;
+    const categoryOptions = Object.entries(categoryLegend).map(([key, meta]) => ({
+        value: key,
+        label: meta.label,
+        color: meta.color,
+    }));
 
     useEffect(() => {
         if (isOpen) {
@@ -33,6 +47,10 @@ export default function EventModal({ isOpen, onClose, onSave, onDelete, initialD
                 setDescription(initialEvent.description || '');
                 setReminder(initialEvent.reminder || false);
                 setRecurrence(initialEvent.recurrence || 'none');
+                setCategory(initialEvent.category || inferCategory(initialEvent.title));
+                setDurationMinutes(initialEvent.durationMinutes || 60);
+                setTags((initialEvent.tags || []).join(', '));
+                setTodos(initialEvent.todos || []);
             } else if (initialDate) {
                 // Use local time for new event from calendar selection
                 const y = initialDate.getFullYear();
@@ -45,6 +63,10 @@ export default function EventModal({ isOpen, onClose, onSave, onDelete, initialD
                 setDescription('');
                 setReminder(false);
                 setRecurrence('none');
+                setCategory('perso');
+                setDurationMinutes(60);
+                setTags('');
+                setTodos([]);
             }
         } else {
             // Reset state when closed
@@ -74,6 +96,12 @@ export default function EventModal({ isOpen, onClose, onSave, onDelete, initialD
             description,
             reminder,
             recurrence,
+            category,
+            color: categoryLegend[category]?.color || '#22c55e',
+            durationMinutes: Number(durationMinutes) || 60,
+            tags: tags.split(',').map(tag => tag.trim()).filter(Boolean),
+            todos,
+            examMeta: category === 'examen' ? { revisionPlanEnabled: true } : null,
             ...(initialEvent?.notifiedOccurrences && { notifiedOccurrences: initialEvent.notifiedOccurrences })
         });
         onClose();
@@ -82,8 +110,8 @@ export default function EventModal({ isOpen, onClose, onSave, onDelete, initialD
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-            <div className="w-full max-w-md bg-[#1e1e1e] border border-white/10 rounded-2xl shadow-2xl p-6 scale-100 animate-in zoom-in-95 duration-200">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="max-h-[92vh] w-full max-w-md overflow-y-auto custom-scrollbar bg-[#1e1e1e] border border-white/10 rounded-2xl shadow-2xl p-6 scale-100 animate-in zoom-in-95 duration-200">
                 <div className="flex justify-between items-center mb-6">
                     <h2 className="text-xl font-semibold text-white">
                         {initialEvent ? 'Modifier l\'événement' : 'Nouvel événement'}
@@ -123,13 +151,13 @@ export default function EventModal({ isOpen, onClose, onSave, onDelete, initialD
                         </div>
                     </div>
 
-                    <div className="relative">
-                        <AlignLeft className="absolute left-3 top-3 text-white/30" size={18} />
+                    <div className="relative rounded-xl border border-white/10 bg-white/5 transition-all focus-within:ring-2 focus-within:ring-blue-500/50">
+                        <AlignLeft className="absolute left-3 top-4 text-white/30" size={18} />
                         <textarea
                             placeholder="Description (optionnel)"
                             value={description}
                             onChange={(e) => setDescription(e.target.value)}
-                            className="w-full bg-white/5 border border-white/10 rounded-xl pl-10 pr-4 py-3 text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-blue-500/50 min-h-[100px] resize-none"
+                            className="block w-full min-h-[108px] resize-none bg-transparent pl-10 pr-4 py-4 leading-relaxed text-white placeholder-white/30 focus:outline-none"
                         />
                     </div>
 
@@ -139,6 +167,75 @@ export default function EventModal({ isOpen, onClose, onSave, onDelete, initialD
                             value={recurrence}
                             onChange={setRecurrence}
                         />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                        <label className="grid gap-2 text-sm text-white/70">
+                            Type
+                            <CustomSelect
+                                value={category}
+                                onChange={setCategory}
+                                options={categoryOptions}
+                                ariaLabel="Type d'événement"
+                            />
+                        </label>
+                        <label className="grid gap-2 text-sm text-white/70">
+                            Durée
+                            <input
+                                type="number"
+                                min="5"
+                                step="5"
+                                value={durationMinutes}
+                                onChange={(e) => setDurationMinutes(e.target.value)}
+                                className="bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                            />
+                        </label>
+                    </div>
+
+                    <div className="relative">
+                        <Tag className="absolute left-3 top-3 text-white/30" size={18} />
+                        <input
+                            type="text"
+                            placeholder="Tags séparés par des virgules"
+                            value={tags}
+                            onChange={(e) => setTags(e.target.value)}
+                            className="w-full bg-white/5 border border-white/10 rounded-xl pl-10 pr-4 py-3 text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-all"
+                        />
+                    </div>
+
+                    <div className="p-3 bg-white/5 rounded-xl border border-white/5 space-y-2">
+                        <div className="flex items-center gap-2 text-sm font-medium text-white/80">
+                            <ListChecks size={16} /> Mini todo-list
+                        </div>
+                        <div className="flex gap-2">
+                            <input
+                                value={newTodo}
+                                onChange={(e) => setNewTodo(e.target.value)}
+                                placeholder="Ajouter une tâche"
+                                className="flex-1 bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 focus:outline-none"
+                            />
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    if (!newTodo.trim()) return;
+                                    setTodos(prev => [...prev, { id: Date.now().toString(), title: newTodo.trim(), done: false }]);
+                                    setNewTodo('');
+                                }}
+                                className="p-2 bg-blue-500 hover:bg-blue-600 rounded-lg text-white"
+                            >
+                                <Plus size={16} />
+                            </button>
+                        </div>
+                        {todos.map(todo => (
+                            <label key={todo.id} className="flex items-center gap-2 text-sm text-white/70">
+                                <input
+                                    type="checkbox"
+                                    checked={todo.done}
+                                    onChange={(e) => setTodos(prev => prev.map(item => item.id === todo.id ? { ...item, done: e.target.checked } : item))}
+                                />
+                                <span className={todo.done ? 'line-through opacity-50' : ''}>{todo.title}</span>
+                            </label>
+                        ))}
                     </div>
 
                     <div className="flex items-center gap-3 p-3 bg-white/5 rounded-xl cursor-pointer hover:bg-white/10 transition-colors" onClick={() => setReminder(!reminder)}>

@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { X, Monitor, Cpu, Info, Check, RefreshCw, Layout, Download, Upload, Coffee, Image as ImageIcon, Search } from 'lucide-react';
+import React, { useMemo, useState, useEffect } from 'react';
+import { X, Monitor, Cpu, Info, Check, RefreshCw, Layout, Download, Upload, Coffee, Image as ImageIcon, Search, Tags, ListChecks, Link as LinkIcon } from 'lucide-react';
 import { getVersion } from '@tauri-apps/plugin-app';
 import { check } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
@@ -7,12 +7,15 @@ import { invoke } from '@tauri-apps/api/core';
 import { message, save, ask } from '@tauri-apps/plugin-dialog';
 import { open as openLink } from '@tauri-apps/plugin-shell';
 import UpdateModal from './UpdateModal';
+import CustomSelect from './CustomSelect';
 import { open } from '@tauri-apps/plugin-dialog';
 import { Trash2, Plus, Volume2, Music, Play } from 'lucide-react';
 import { enable, disable, isEnabled } from '@tauri-apps/plugin-autostart';
 import { playBubbleSound, playRingtone, playNotificationSound } from '../utils/sound';
 import { generateICS, parseICS } from '../utils/ics';
 import { writeTextFile, readTextFile } from '@tauri-apps/plugin-fs';
+import { DEFAULT_CATEGORY_LEGEND, normalizeSettings } from '../domain/events';
+import { normalizeIcsSources } from '../domain/icsSources';
 
 const DEFAULT_MODELS = [
     { id: 'mistralai/mistral-7b-instruct', name: 'Mistral 7B (Gratuit)' },
@@ -30,6 +33,10 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave, onPre
     const [showUpdateModal, setShowUpdateModal] = useState(false);
     const [availableUpdate, setAvailableUpdate] = useState(null);
     const [newModelInput, setNewModelInput] = useState('');
+    const [newCategory, setNewCategory] = useState({ id: '', label: '', color: '#60a5fa' });
+    const [newRoutine, setNewRoutine] = useState({ title: '', category: 'perso', durationMinutes: 60 });
+    const [newIcsSource, setNewIcsSource] = useState({ label: '', url: '' });
+    const [isSavingSettings, setIsSavingSettings] = useState(false);
     
     // Unsplash State
     const [unsplashQuery, setUnsplashQuery] = useState('');
@@ -39,11 +46,23 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave, onPre
     const [hasSearched, setHasSearched] = useState(false);
 
     const displayOsName = osType === 'macos' ? 'macOS' : (osType === 'linux' ? 'Linux' : 'Windows');
+    const categoryLegend = localSettings.categoryLegend || DEFAULT_CATEGORY_LEGEND;
+    const categoryOptions = useMemo(() => Object.entries(categoryLegend).map(([key, meta]) => ({
+        value: key,
+        label: meta.label,
+        color: meta.color,
+    })), [categoryLegend]);
+    const dateFormatOptions = [
+        { value: 'weekday-short', label: 'Mar. 16 juin, 09:00' },
+        { value: 'long', label: 'Mardi 16 juin 2026, 09:00' },
+        { value: 'numeric', label: '16/06/2026, 09:00' },
+    ];
 
     useEffect(() => {
         if (isOpen) {
 
             setLocalSettings({ ...settings, customModels: settings.customModels || [] });
+            setIsSavingSettings(false);
 
             // Check autostart status
             isEnabled().then(enabled => {
@@ -73,45 +92,51 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave, onPre
     }, [isOpen, settings]);
 
     const handleChange = (key, value) => {
-        setLocalSettings(prev => {
-            const newSettings = { ...prev, [key]: value };
-            
-            // Live preview
-            if (onPreview) {
-                onPreview(newSettings);
-            }
+        const previewSettings = { ...localSettings, [key]: value };
+        setLocalSettings(prev => ({ ...prev, [key]: value }));
 
-            // Apply immediate effects for window style only (preview)
-            if (key === 'windowEffect') {
-                invoke('set_window_effect', { effect: value });
-            }
+        // Apply immediate effects outside the state updater to avoid render-phase side effects.
+        if (key === 'windowEffect') {
+            invoke('set_window_effect', { effect: value });
+        }
 
-            if (key === 'autoStart') {
-                (async () => {
-                    try {
-                        if (value) await enable();
-                        else await disable();
-                    } catch (e) {
-                        console.error('Failed to toggle autostart', e);
-                    }
-                })();
-            }
+        if (key === 'autoStart') {
+            (async () => {
+                try {
+                    if (value) await enable();
+                    else await disable();
+                } catch (e) {
+                    console.error('Failed to toggle autostart', e);
+                }
+            })();
+        }
 
-            return newSettings;
-        });
+        if (onPreview) {
+            queueMicrotask(() => onPreview(previewSettings));
+        }
     };
 
     const handleMultipleChanges = (changes) => {
+        const previewSettings = { ...localSettings, ...changes };
         setLocalSettings(prev => {
             const newSettings = { ...prev, ...changes };
-            if (onPreview) onPreview(newSettings);
             return newSettings;
         });
+        if (onPreview) {
+            queueMicrotask(() => onPreview(previewSettings));
+        }
     };
 
-    const handleSave = () => {
-        onSave(localSettings);
-        // Do not call onClose here, let the parent handle it
+    const handleSave = async () => {
+        if (isSavingSettings) return;
+        setIsSavingSettings(true);
+        try {
+            await onSave(normalizeSettings(localSettings));
+        } catch (error) {
+            console.error('Failed to apply settings:', error);
+            await message(`Impossible d'appliquer les changements : ${error.message || error}`, { kind: 'error', title: 'Paramètres' });
+            setIsSavingSettings(false);
+        }
     };
 
     const handleExportICS = async () => {
@@ -264,6 +289,90 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave, onPre
         handleChange('soundConfig', newConfig);
     };
 
+    const handleExportTheme = async () => {
+        const path = await save({
+            filters: [{ name: 'Thème Caltemp', extensions: ['json'] }],
+            defaultPath: 'caltemp-theme.json'
+        });
+        if (!path) return;
+        const theme = {
+            id: localSettings.activeThemeId || 'custom',
+            categoryLegend: localSettings.categoryLegend || DEFAULT_CATEGORY_LEGEND,
+            windowEffect: localSettings.windowEffect,
+            appBackground: localSettings.appBackground,
+        };
+        await writeTextFile(path, JSON.stringify(theme, null, 2));
+    };
+
+    const handleImportTheme = async () => {
+        const path = await open({
+            multiple: false,
+            filters: [{ name: 'Thème Caltemp', extensions: ['json'] }]
+        });
+        if (!path) return;
+        try {
+            const theme = JSON.parse(await readTextFile(path));
+            if (!theme || typeof theme !== 'object') throw new Error('Format invalide');
+            handleMultipleChanges({
+                activeThemeId: theme.id || 'custom',
+                categoryLegend: theme.categoryLegend || localSettings.categoryLegend || DEFAULT_CATEGORY_LEGEND,
+                windowEffect: theme.windowEffect || localSettings.windowEffect,
+                appBackground: theme.appBackground || localSettings.appBackground,
+            });
+        } catch (error) {
+            await message(`Thème invalide : ${error.message}`, { kind: 'error' });
+        }
+    };
+
+    const handleAddRoutine = () => {
+        if (!newRoutine.title.trim()) return;
+        handleChange('routines', [
+            ...(localSettings.routines || []),
+            {
+                id: Date.now().toString(),
+                title: newRoutine.title.trim(),
+                category: newRoutine.category,
+                durationMinutes: Number(newRoutine.durationMinutes) || 60,
+            }
+        ]);
+        setNewRoutine({ title: '', category: 'perso', durationMinutes: 60 });
+    };
+
+    const handleAddCategory = () => {
+        const id = (newCategory.id || newCategory.label)
+            .trim()
+            .toLocaleLowerCase('fr-FR')
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/[^a-z0-9_-]+/g, '-')
+            .replace(/^-|-$/g, '');
+        if (!id || !newCategory.label.trim()) return;
+        handleChange('categoryLegend', {
+            ...categoryLegend,
+            [id]: {
+                label: newCategory.label.trim(),
+                color: newCategory.color,
+                custom: true,
+            },
+        });
+        setNewCategory({ id: '', label: '', color: '#60a5fa' });
+    };
+
+    const handleAddIcsSource = () => {
+        if (!newIcsSource.label.trim() || !newIcsSource.url.trim()) return;
+        handleChange('icsSources', normalizeIcsSources([
+            ...(localSettings.icsSources || []),
+            {
+                id: `custom-${Date.now()}`,
+                label: newIcsSource.label.trim(),
+                type: 'url',
+                url: newIcsSource.url.trim(),
+                enabled: true,
+            }
+        ]));
+        setNewIcsSource({ label: '', url: '' });
+    };
+
     if (!isOpen) return null;
 
     const searchUnsplash = async () => {
@@ -328,6 +437,7 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave, onPre
     const tabs = [
         { id: 'general', label: 'Général', icon: Monitor },
         { id: 'appearance', label: 'Apparence', icon: Layout },
+        { id: 'productivity', label: 'Productivité', icon: ListChecks },
         { id: 'sounds', label: 'Sons', icon: Volume2 },
         { id: 'ai', label: 'Intelligence Artificielle', icon: Cpu },
         { id: 'background', label: 'Fond de l\'app', icon: ImageIcon },
@@ -348,7 +458,7 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave, onPre
                                 onClick={() => setActiveTab(tab.id)}
                                 className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${activeTab === tab.id ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}
                             >
-                                <tab.icon className="w-4 h-4" />
+                                <tab.icon className="w-4 h-4 shrink-0" />
                                 {tab.label}
                             </button>
                         ))}
@@ -790,6 +900,203 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave, onPre
                                 </div>
                             )}
 
+                            {/* --- PRODUCTIVITY --- */}
+                            {activeTab === 'productivity' && (
+                                <div className="space-y-6">
+                                    <div className="space-y-4">
+                                        <h4 className="text-sm font-medium text-gray-400 uppercase tracking-wider">Affichage</h4>
+                                        <label className="grid gap-2">
+                                            <span className="text-sm text-white">Format des dates</span>
+                                            <CustomSelect
+                                                value={localSettings.dateFormat || 'weekday-short'}
+                                                onChange={(value) => handleChange('dateFormat', value)}
+                                                options={dateFormatOptions}
+                                                ariaLabel="Format des dates"
+                                            />
+                                        </label>
+
+                                        <label className="flex items-center justify-between p-4 bg-white/5 rounded-xl cursor-pointer hover:bg-white/10 transition-colors">
+                                            <div>
+                                                <div className="font-medium text-white">Notifications silencieuses</div>
+                                                <div className="text-sm text-gray-400">Couper les sons et afficher un badge compteur dans la barre de titre</div>
+                                            </div>
+                                            <div className={`w-12 h-6 rounded-full transition-colors relative ${localSettings.notificationMode === 'silent' ? 'bg-amber-600' : 'bg-gray-600'}`} onClick={() => handleChange('notificationMode', localSettings.notificationMode === 'silent' ? 'normal' : 'silent')}>
+                                                <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${localSettings.notificationMode === 'silent' ? 'left-7' : 'left-1'}`} />
+                                            </div>
+                                        </label>
+                                    </div>
+
+                                    <div className="space-y-4 pt-4 border-t border-white/5">
+                                        <h4 className="text-sm font-medium text-gray-400 uppercase tracking-wider flex items-center gap-2"><Tags size={14} /> Légende des catégories</h4>
+                                        {Object.entries(categoryLegend).map(([key, meta]) => (
+                                            <div key={key} className="grid grid-cols-[1fr_96px_auto] gap-3 items-center">
+                                                <input
+                                                    value={meta.label}
+                                                    onChange={(e) => handleChange('categoryLegend', {
+                                                        ...categoryLegend,
+                                                        [key]: { ...meta, label: e.target.value }
+                                                    })}
+                                                    className="bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white"
+                                                />
+                                                <input
+                                                    type="color"
+                                                    value={meta.color}
+                                                    onChange={(e) => handleChange('categoryLegend', {
+                                                        ...categoryLegend,
+                                                        [key]: { ...meta, color: e.target.value }
+                                                    })}
+                                                    className="h-10 w-full bg-white/5 border border-white/10 rounded-xl"
+                                                />
+                                                <button
+                                                    type="button"
+                                                    disabled={!meta.custom}
+                                                    onClick={() => {
+                                                        const nextLegend = { ...categoryLegend };
+                                                        delete nextLegend[key];
+                                                        handleChange('categoryLegend', nextLegend);
+                                                    }}
+                                                    className="h-10 w-10 rounded-xl border border-white/10 text-white/40 hover:text-red-300 hover:bg-red-500/10 disabled:opacity-20 disabled:hover:bg-transparent disabled:hover:text-white/40"
+                                                    title={meta.custom ? 'Supprimer la catégorie' : 'Catégorie par défaut'}
+                                                >
+                                                    <Trash2 size={16} className="mx-auto" />
+                                                </button>
+                                            </div>
+                                        ))}
+                                        <div className="grid grid-cols-[1fr_96px_auto] gap-3 items-center rounded-xl border border-white/5 bg-white/[0.03] p-3">
+                                            <input
+                                                value={newCategory.label}
+                                                onChange={(e) => setNewCategory(prev => ({ ...prev, label: e.target.value }))}
+                                                placeholder="Nouvelle catégorie"
+                                                className="bg-black/20 border border-white/10 rounded-xl px-3 py-2 text-white placeholder-white/30"
+                                            />
+                                            <input
+                                                type="color"
+                                                value={newCategory.color}
+                                                onChange={(e) => setNewCategory(prev => ({ ...prev, color: e.target.value }))}
+                                                className="h-10 w-full bg-white/5 border border-white/10 rounded-xl"
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={handleAddCategory}
+                                                className="h-10 px-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm"
+                                            >
+                                                Ajouter
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-4 pt-4 border-t border-white/5">
+                                        <div className="flex items-center justify-between">
+                                            <h4 className="text-sm font-medium text-gray-400 uppercase tracking-wider">Routines</h4>
+                                        </div>
+                                        <div className="rounded-xl border border-white/5 bg-white/[0.03] p-3 space-y-2">
+                                            <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_150px]">
+                                                <input
+                                                    value={newRoutine.title}
+                                                    onChange={(e) => setNewRoutine(prev => ({ ...prev, title: e.target.value }))}
+                                                    placeholder="Nom de la routine"
+                                                    className="min-w-0 bg-black/20 border border-white/10 rounded-xl px-3 py-2 text-white placeholder-white/30"
+                                                />
+                                                <CustomSelect
+                                                    value={newRoutine.category}
+                                                    onChange={(value) => setNewRoutine(prev => ({ ...prev, category: value }))}
+                                                    options={categoryOptions}
+                                                    ariaLabel="Type de routine"
+                                                />
+                                            </div>
+                                            <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+                                                <input
+                                                    type="number"
+                                                    min="5"
+                                                    step="5"
+                                                    value={newRoutine.durationMinutes}
+                                                    onChange={(e) => setNewRoutine(prev => ({ ...prev, durationMinutes: e.target.value }))}
+                                                    className="min-w-0 bg-black/20 border border-white/10 rounded-xl px-3 py-2 text-white"
+                                                />
+                                                <button onClick={handleAddRoutine} className="h-10 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-sm text-white">Ajouter</button>
+                                            </div>
+                                        </div>
+                                        {(localSettings.routines || []).length === 0 ? (
+                                            <p className="text-sm text-white/40">Aucune routine enregistrée.</p>
+                                        ) : (localSettings.routines || []).map(routine => (
+                                            <div key={routine.id} className="p-3 rounded-xl bg-white/5 border border-white/5 text-sm text-white flex items-center justify-between gap-3">
+                                                <span className="flex min-w-0 items-center gap-2">
+                                                    <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: categoryLegend[routine.category]?.color || '#60a5fa' }} />
+                                                    <span className="truncate">{routine.title}</span>
+                                                </span>
+                                                <span className="text-white/40 shrink-0">{routine.durationMinutes} min</span>
+                                            </div>
+                                        ))}
+                                    </div>
+
+                                    <div className="space-y-3 pt-4 border-t border-white/5">
+                                        <h4 className="text-sm font-medium text-gray-400 uppercase tracking-wider">Sources ICS</h4>
+                                        <div className="divide-y divide-white/5 rounded-xl border border-white/5 bg-white/[0.025]">
+                                            {normalizeIcsSources(localSettings.icsSources || []).map(source => (
+                                                <div key={source.id} className="px-3 py-2.5">
+                                                    <div className="flex items-center gap-3">
+                                                        <LinkIcon size={13} className="shrink-0 text-white/35" />
+                                                        <div className="min-w-0 flex-1">
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="truncate text-sm font-medium text-white/90">{source.label}</span>
+                                                                <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] ${source.enabled ? 'bg-emerald-500/10 text-emerald-300' : 'bg-white/5 text-white/35'}`}>
+                                                                    {source.enabled ? 'Actif' : 'Off'}
+                                                                </span>
+                                                            </div>
+                                                            <div className="truncate text-[11px] text-white/35">{source.url || source.path || 'URL ICS à compléter'}</div>
+                                                        </div>
+                                                        {source.helpUrl && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => openLink(source.helpUrl)}
+                                                                className="shrink-0 text-[11px] font-medium text-blue-300/75 hover:text-blue-200 hover:underline"
+                                                            >
+                                                                Aide
+                                                            </button>
+                                                        )}
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={source.enabled}
+                                                            onChange={(e) => handleChange('icsSources', normalizeIcsSources(localSettings.icsSources || []).map(item => item.id === source.id ? { ...item, enabled: e.target.checked } : item))}
+                                                            className="shrink-0"
+                                                            aria-label={`Activer ${source.label}`}
+                                                        />
+                                                    </div>
+                                                    {source.needsUrl && (
+                                                        <input
+                                                            value={source.url || ''}
+                                                            onChange={(e) => handleChange('icsSources', normalizeIcsSources(localSettings.icsSources || []).map(item => item.id === source.id ? { ...item, url: e.target.value } : item))}
+                                                            placeholder="Coller l'URL ICS privée"
+                                                            className="mt-2 w-full bg-black/20 border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-white/30"
+                                                        />
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,0.9fr)_minmax(0,1.4fr)_auto]">
+                                            <input
+                                                value={newIcsSource.label}
+                                                onChange={(e) => setNewIcsSource(prev => ({ ...prev, label: e.target.value }))}
+                                                placeholder="Nom"
+                                                className="min-w-0 bg-black/20 border border-white/10 rounded-lg px-2.5 py-2 text-sm text-white placeholder-white/30"
+                                            />
+                                            <input
+                                                value={newIcsSource.url}
+                                                onChange={(e) => setNewIcsSource(prev => ({ ...prev, url: e.target.value }))}
+                                                placeholder="https://.../calendar.ics"
+                                                className="min-w-0 bg-black/20 border border-white/10 rounded-lg px-2.5 py-2 text-sm text-white placeholder-white/30"
+                                            />
+                                            <button type="button" onClick={handleAddIcsSource} className="h-10 px-3 rounded-lg bg-blue-600 hover:bg-blue-500 text-sm text-white">Ajouter</button>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex gap-3 pt-4 border-t border-white/5">
+                                        <button onClick={handleExportTheme} className="flex-1 px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 text-white text-sm">Exporter le thème JSON</button>
+                                        <button onClick={handleImportTheme} className="flex-1 px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 text-white text-sm">Importer un thème JSON</button>
+                                    </div>
+                                </div>
+                            )}
+
                             {/* --- ABOUT --- */}
                             {activeTab === 'about' && (
                                 <div className="text-center space-y-6 py-8">
@@ -833,9 +1140,10 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave, onPre
                             </button>
                             <button
                                 onClick={handleSave}
-                                className="px-6 py-2 rounded-xl text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-900/20 transition-all"
+                                disabled={isSavingSettings}
+                                className="px-6 py-2 rounded-xl text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-900/20 transition-all disabled:cursor-not-allowed disabled:opacity-60"
                             >
-                                Appliquer les changements
+                                {isSavingSettings ? 'Application...' : 'Appliquer les changements'}
                             </button>
                         </div>
                     </div>
