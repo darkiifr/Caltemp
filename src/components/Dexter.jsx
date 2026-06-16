@@ -9,6 +9,7 @@ import { Search, Loader2, Sparkles, MessageSquare, CornerDownLeft, Command, Eras
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ChevronDown, ChevronUp, Brain, FileText as FileIcon } from 'lucide-react';
+import { handleLocalDexterCommand } from '../domain/dexterLocal';
 
 const ThoughtBlock = React.memo(({ content }) => {
     const [isExpanded, setIsExpanded] = useState(false);
@@ -131,7 +132,7 @@ const MessageItem = React.memo(({ msg }) => {
 });
 MessageItem.displayName = "MessageItem";
 
-export default function Dexter({ onClose, settings, onAddEvent }) {
+export default function Dexter({ onClose, settings, events = [], onAddEvent }) {
     const [messages, setMessages] = useState([]);
     const [isTyping, setIsTyping] = useState(false);
     const [isSearching, setIsSearching] = useState(false);
@@ -186,6 +187,22 @@ export default function Dexter({ onClose, settings, onAddEvent }) {
         setMessages(prev => [...prev, userMsg]);
         setIsTyping(true);
         if (isSearch) setIsSearching(true);
+
+        const localCommand = handleLocalDexterCommand(cleanValue, { events, now: new Date() });
+        if (localCommand.handled) {
+            if (localCommand.type === 'create-event' && localCommand.event) {
+                await onAddEvent(localCommand.event);
+            }
+            setMessages(prev => [...prev, {
+                id: Date.now() + 1,
+                role: 'assistant',
+                content: localCommand.message,
+            }]);
+            setIsTyping(false);
+            setIsSearching(false);
+            abortControllerRef.current = null;
+            return;
+        }
 
 
 

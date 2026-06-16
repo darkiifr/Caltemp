@@ -1,8 +1,43 @@
 import { readTextFile, writeTextFile, exists, mkdir, BaseDirectory } from '@tauri-apps/plugin-fs';
+import { invoke } from '@tauri-apps/api/core';
+import { normalizeEvents, normalizeSettings } from '../domain/events';
 // import { appDataDir } from '@tauri-apps/api/path';
 
 const EVENTS_FILE = 'events.json';
 const SETTINGS_FILE = 'settings.json';
+let portableModePromise;
+
+async function isPortableMode() {
+    if (!window.__TAURI_INTERNALS__) return false;
+    if (!portableModePromise) {
+        portableModePromise = invoke('is_portable_mode')
+            .catch(error => {
+                console.error('Failed to detect portable mode:', error);
+                return false;
+            });
+    }
+    return portableModePromise;
+}
+
+async function readDataFile(fileName) {
+    if (await isPortableMode()) {
+        return invoke('read_portable_data_file', { fileName });
+    }
+
+    const fileExists = await exists(fileName, { baseDir: BaseDirectory.AppData });
+    if (!fileExists) return null;
+    return readTextFile(fileName, { baseDir: BaseDirectory.AppData });
+}
+
+async function writeDataFile(fileName, content) {
+    if (await isPortableMode()) {
+        await invoke('write_portable_data_file', { fileName, content });
+        return;
+    }
+
+    await ensureDir();
+    await writeTextFile(fileName, content, { baseDir: BaseDirectory.AppData });
+}
 
 // Helper to ensure directory exists
 async function ensureDir() {
@@ -18,15 +53,13 @@ async function ensureDir() {
 
 export async function loadEvents() {
     try {
-        await ensureDir();
-        const fileExists = await exists(EVENTS_FILE, { baseDir: BaseDirectory.AppData });
-        
-        if (!fileExists) {
+        const content = await readDataFile(EVENTS_FILE);
+
+        if (!content) {
             return [];
         }
 
-        const content = await readTextFile(EVENTS_FILE, { baseDir: BaseDirectory.AppData });
-        return JSON.parse(content);
+        return normalizeEvents(JSON.parse(content));
     } catch (error) {
         console.error('Failed to load events:', error);
         return [];
@@ -35,8 +68,7 @@ export async function loadEvents() {
 
 export async function saveEvents(events) {
     try {
-        await ensureDir();
-        await writeTextFile(EVENTS_FILE, JSON.stringify(events, null, 2), { baseDir: BaseDirectory.AppData });
+        await writeDataFile(EVENTS_FILE, JSON.stringify(events, null, 2));
     } catch (error) {
         console.error('Failed to save events:', error);
         throw error;
@@ -45,29 +77,24 @@ export async function saveEvents(events) {
 
 export async function loadSettings() {
     try {
-        await ensureDir();
-        const fileExists = await exists(SETTINGS_FILE, { baseDir: BaseDirectory.AppData });
-        
-        if (!fileExists) {
-            return {
-                theme: 'dark',
+        const content = await readDataFile(SETTINGS_FILE);
+
+        if (!content) {
+            return normalizeSettings({
                 startMinimized: false,
-                notifications: true
-            };
+            });
         }
 
-        const content = await readTextFile(SETTINGS_FILE, { baseDir: BaseDirectory.AppData });
-        return JSON.parse(content);
+        return normalizeSettings(JSON.parse(content));
     } catch (error) {
         console.error('Failed to load settings:', error);
-        return {};
+        return normalizeSettings({});
     }
 }
 
 export async function saveSettings(settings) {
     try {
-        await ensureDir();
-        await writeTextFile(SETTINGS_FILE, JSON.stringify(settings, null, 2), { baseDir: BaseDirectory.AppData });
+        await writeDataFile(SETTINGS_FILE, JSON.stringify(settings, null, 2));
     } catch (error) {
         console.error('Failed to save settings:', error);
         throw error;

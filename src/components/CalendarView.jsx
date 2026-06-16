@@ -4,6 +4,8 @@ import { getHolidays } from '../utils/holidays';
 import DayDetails from './DayDetails';
 import { playBubbleSound } from '../utils/sound';
 import { getOccurrencesOnDate } from '../utils/eventUtils';
+import { buildStats } from '../domain/planning';
+import { formatEventDate, DEFAULT_CATEGORY_LEGEND } from '../domain/events';
 
 const DAYS = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
 const MONTHS = [
@@ -11,10 +13,13 @@ const MONTHS = [
     'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'
 ];
 
-export default function CalendarView({ events, onAddEvent, onEditEvent, onDeleteEvent, showHolidays = true, showNamedays = true }) {
+const AGENDA_WINDOW_DAYS = 45;
+const FOCUS_WINDOW_DAYS = 14;
+
+export default function CalendarView({ events, settings = {}, onAddEvent, onEditEvent, onDeleteEvent, showHolidays = true, showNamedays = true }) {
     const [currentDate, setCurrentDate] = useState(new Date());
     const [selectedDate, setSelectedDate] = useState(new Date());
-    const [view, setView] = useState('month'); // 'year', 'month', 'week', 'day'
+    const [view, setView] = useState('month'); // 'year', 'month', 'week', 'day', 'agenda', 'focus', 'stats'
     const [direction, setDirection] = useState('right');
     const [now, setNow] = useState(new Date());
     const dayScrollRef = useRef(null);
@@ -69,6 +74,8 @@ export default function CalendarView({ events, onAddEvent, onEditEvent, onDelete
         return getOccurrencesOnDate(events, date);
     };
 
+    const categoryLegend = settings.categoryLegend || DEFAULT_CATEGORY_LEGEND;
+
     // Navigation
     const navigate = (dir) => {
         playBubbleSound();
@@ -83,6 +90,12 @@ export default function CalendarView({ events, onAddEvent, onEditEvent, onDelete
             newDate.setDate(newDate.getDate() + (dir * 7));
         } else if (view === 'day') {
             newDate.setDate(newDate.getDate() + dir);
+        } else if (view === 'agenda') {
+            newDate.setDate(newDate.getDate() + (dir * AGENDA_WINDOW_DAYS));
+        } else if (view === 'focus') {
+            newDate.setDate(newDate.getDate() + (dir * FOCUS_WINDOW_DAYS));
+        } else if (view === 'stats') {
+            newDate.setDate(newDate.getDate() + (dir * 7));
         }
         setCurrentDate(newDate);
         // Sync selected date roughly to keep context? Or keep it independent?
@@ -108,6 +121,7 @@ export default function CalendarView({ events, onAddEvent, onEditEvent, onDelete
     // Renderers
     const renderHeader = () => {
         let title = '';
+        let subtitle = '';
         if (view === 'year') title = `${currentDate.getFullYear()}`;
         else if (view === 'month') title = `${MONTHS[currentDate.getMonth()]} ${currentDate.getFullYear()}`;
         else if (view === 'week') {
@@ -125,6 +139,23 @@ export default function CalendarView({ events, onAddEvent, onEditEvent, onDelete
         }
         else if (view === 'day') {
             title = `${DAYS[currentDate.getDay()]} ${currentDate.getDate()} ${MONTHS[currentDate.getMonth()]}`;
+        } else if (view === 'agenda') {
+            title = 'Agenda';
+            const end = new Date(currentDate);
+            end.setDate(currentDate.getDate() + AGENDA_WINDOW_DAYS - 1);
+            subtitle = `${formatEventDate(currentDate, settings, { includeTime: false })} - ${formatEventDate(end, settings, { includeTime: false })}`;
+        } else if (view === 'focus') {
+            title = 'Mode focus';
+            const end = new Date(currentDate);
+            end.setDate(currentDate.getDate() + FOCUS_WINDOW_DAYS - 1);
+            subtitle = `Priorités du ${formatEventDate(currentDate, settings, { includeTime: false })} au ${formatEventDate(end, settings, { includeTime: false })}`;
+        } else if (view === 'stats') {
+            title = 'Statistiques';
+            const startOfWeek = new Date(currentDate);
+            startOfWeek.setDate(currentDate.getDate() - currentDate.getDay());
+            const endOfWeek = new Date(startOfWeek);
+            endOfWeek.setDate(startOfWeek.getDate() + 6);
+            subtitle = `Semaine du ${formatEventDate(startOfWeek, settings, { includeTime: false })} au ${formatEventDate(endOfWeek, settings, { includeTime: false })}`;
         }
 
         return (
@@ -138,10 +169,15 @@ export default function CalendarView({ events, onAddEvent, onEditEvent, onDelete
                     <h2 className="text-2xl font-bold tracking-tight">
                         {title}
                     </h2>
+                    {subtitle && (
+                        <div className="mt-1 text-xs font-medium text-white/40">
+                            {subtitle}
+                        </div>
+                    )}
                 </div>
                 <div className="flex gap-2 items-center">
                     <div className="bg-white/5 p-1 rounded-xl flex items-center mr-2 border border-white/5 shadow-inner">
-                        {['year', 'month', 'week', 'day'].map((v) => (
+                        {['year', 'month', 'week', 'day', 'agenda', 'focus', 'stats'].map((v) => (
                            <button
                                 key={v}
                                 onClick={() => setView(v)}
@@ -149,7 +185,7 @@ export default function CalendarView({ events, onAddEvent, onEditEvent, onDelete
                                     view === v ? 'bg-white/15 text-white shadow-sm' : 'text-white/40 hover:text-white/80 hover:bg-white/5'
                                 }`}
                            >
-                               {v === 'year' ? 'Année' : v === 'month' ? 'Mois' : v === 'week' ? 'Semaine' : 'Jour'}
+                               {v === 'year' ? 'Année' : v === 'month' ? 'Mois' : v === 'week' ? 'Semaine' : v === 'day' ? 'Jour' : v === 'agenda' ? 'Agenda' : v === 'focus' ? 'Focus' : 'Stats'}
                            </button> 
                         ))}
                     </div>
@@ -292,7 +328,15 @@ export default function CalendarView({ events, onAddEvent, onEditEvent, onDelete
                                 
                                 <div className="flex-1 flex flex-col gap-1 overflow-visible">
                                      {dayEvents.slice(0, 3).map((ev, idx) => (
-                                         <div key={idx} className="bg-blue-500/20 border border-blue-500/30 text-blue-200 text-[10px] sm:text-xs px-1.5 py-0.5 rounded truncate shadow-sm">
+                                         <div
+                                            key={idx}
+                                            className="text-[10px] sm:text-xs px-1.5 py-0.5 rounded truncate shadow-sm border"
+                                            style={{
+                                                backgroundColor: `${ev.color || '#3b82f6'}26`,
+                                                borderColor: `${ev.color || '#3b82f6'}66`,
+                                                color: '#f8fafc',
+                                            }}
+                                         >
                                              {ev.title}
                                          </div>
                                      ))}
@@ -341,7 +385,11 @@ export default function CalendarView({ events, onAddEvent, onEditEvent, onDelete
                                     <div 
                                         key={event.id} 
                                         onClick={(e) => { e.stopPropagation(); onEditEvent(event); }}
-                                        className="bg-[#3b82f6]/20 border border-[#3b82f6]/30 px-3 py-2 rounded-xl text-sm hover:bg-[#3b82f6]/30 cursor-pointer transition-colors shadow-sm"
+                                        className="px-3 py-2 rounded-xl text-sm cursor-pointer transition-colors shadow-sm border hover:brightness-125"
+                                        style={{
+                                            backgroundColor: `${event.color || '#3b82f6'}26`,
+                                            borderColor: `${event.color || '#3b82f6'}66`,
+                                        }}
                                     >
                                         <div className="font-semibold text-blue-200">
                                             {event.title}
@@ -419,8 +467,13 @@ export default function CalendarView({ events, onAddEvent, onEditEvent, onDelete
                                 <div
                                     key={event.id}
                                     onDoubleClick={(e) => { e.stopPropagation(); onEditEvent(event); }}
-                                    className="absolute left-[90px] right-4 rounded-lg bg-[#3b82f6]/20 border-l-[3px] border-[#3b82f6] px-3 py-2 cursor-pointer hover:bg-[#3b82f6]/30 hover:z-20 transition-all overflow-hidden group select-none z-10 shadow-sm backdrop-blur-[1px]"
-                                    style={{ top: `${top}px`, height: `${height - 2}px` }} 
+                                    className="absolute left-[90px] right-4 rounded-lg border-l-[3px] px-3 py-2 cursor-pointer hover:z-20 transition-all overflow-hidden group select-none z-10 shadow-sm backdrop-blur-[1px]"
+                                    style={{
+                                        top: `${top}px`,
+                                        height: `${height - 2}px`,
+                                        backgroundColor: `${event.color || '#3b82f6'}26`,
+                                        borderColor: event.color || '#3b82f6',
+                                    }}
                                     title={`${event.title} (${d.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})})`}
                                 >
                                     <div className="flex flex-col h-full pl-0.5">
@@ -467,6 +520,212 @@ export default function CalendarView({ events, onAddEvent, onEditEvent, onDelete
         );
     };
 
+    const getUpcomingEvents = (days = 30) => {
+        const upcoming = [];
+        const start = new Date(currentDate);
+        start.setHours(0, 0, 0, 0);
+        for (let offset = 0; offset < days; offset += 1) {
+            const date = new Date(start);
+            date.setDate(start.getDate() + offset);
+            upcoming.push(...getEventsForDay(date));
+        }
+        return upcoming.sort((a, b) => new Date(a.date) - new Date(b.date));
+    };
+
+    const renderAgendaView = () => {
+        const agendaDays = Array.from({ length: AGENDA_WINDOW_DAYS }, (_, offset) => {
+            const date = new Date(currentDate);
+            date.setHours(0, 0, 0, 0);
+            date.setDate(date.getDate() + offset);
+            return {
+                date,
+                events: getEventsForDay(date).sort((a, b) => new Date(a.date) - new Date(b.date)),
+            };
+        }).filter(day => day.events.length > 0);
+
+        return (
+            <div className="flex-1 overflow-y-auto custom-scrollbar px-4 pb-4">
+                {agendaDays.length === 0 ? (
+                    <div className="h-full flex items-center justify-center text-white/40">Aucun événement sur cette période.</div>
+                ) : (
+                    <div className="mx-auto grid w-full max-w-4xl gap-5">
+                        <div className="rounded-2xl border border-white/5 bg-white/[0.04] px-4 py-3 text-sm text-white/55">
+                            Vue liste : seuls les jours avec événements sont affichés, à partir de la date sélectionnée.
+                        </div>
+                        {agendaDays.map(day => (
+                            <section key={day.date.toISOString()} className="grid gap-2">
+                                <div className="flex items-center gap-3 text-xs uppercase tracking-widest text-white/35">
+                                    <span className="h-px flex-1 bg-white/10" />
+                                    <span>{day.date.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}</span>
+                                    <span className="h-px flex-1 bg-white/10" />
+                                </div>
+                                <div className="grid gap-2">
+                                    {day.events.map(event => (
+                                        <button
+                                            key={`${event.id}-${event.date}`}
+                                            onClick={() => onEditEvent(event)}
+                                            className="w-full text-left p-4 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 transition-colors flex items-center gap-4"
+                                        >
+                                            <div className="w-1.5 self-stretch rounded-full" style={{ backgroundColor: event.color || categoryLegend[event.category]?.color || '#60a5fa' }} />
+                                            <div className="flex-1 min-w-0">
+                                                <div className="font-semibold text-white truncate">{event.title}</div>
+                                                <div className="text-xs text-white/50 mt-1">
+                                                    {new Date(event.date).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                                                </div>
+                                            </div>
+                                            <span className="text-[11px] px-2 py-1 rounded-full border border-white/10 text-white/60">
+                                                {categoryLegend[event.category]?.label || event.category}
+                                            </span>
+                                        </button>
+                                    ))}
+                                </div>
+                            </section>
+                        ))}
+                    </div>
+                )}
+            </div>
+        );
+    };
+
+    const renderFocusView = () => {
+        const focusEvents = getUpcomingEvents(FOCUS_WINDOW_DAYS);
+        const start = new Date(currentDate);
+        start.setHours(0, 0, 0, 0);
+        const limitFor = (days) => {
+            const date = new Date(start);
+            date.setDate(start.getDate() + days);
+            return date;
+        };
+        const sections = [
+            {
+                title: 'Maintenant',
+                hint: 'Dans les 48 prochaines heures',
+                events: focusEvents.filter(event => new Date(event.date) < limitFor(2)),
+            },
+            {
+                title: 'Cette semaine',
+                hint: 'De J+2 à J+7',
+                events: focusEvents.filter(event => new Date(event.date) >= limitFor(2) && new Date(event.date) < limitFor(7)),
+            },
+            {
+                title: 'À anticiper',
+                hint: 'J+7 à J+14',
+                events: focusEvents.filter(event => new Date(event.date) >= limitFor(7)),
+            },
+        ];
+
+        return (
+            <div className="flex-1 overflow-y-auto custom-scrollbar p-4">
+                <div className="mx-auto grid w-full max-w-5xl gap-4 lg:grid-cols-3">
+                    {sections.map((section, sectionIndex) => (
+                        <section key={section.title} className="rounded-2xl border border-white/5 bg-white/[0.04] p-4">
+                            <div className="mb-4">
+                                <h3 className="text-base font-semibold text-white">{section.title}</h3>
+                                <p className="mt-1 text-xs text-white/40">{section.hint}</p>
+                            </div>
+                            <div className="grid gap-3">
+                                {section.events.length === 0 ? (
+                                    <div className="rounded-xl border border-dashed border-white/10 p-4 text-sm text-white/35">
+                                        Rien à gérer dans ce bloc.
+                                    </div>
+                                ) : section.events.map((event, index) => (
+                                    <button
+                                        key={`${event.id}-${event.date}`}
+                                        onClick={() => onEditEvent(event)}
+                                        className={`text-left rounded-xl border p-4 transition-colors ${sectionIndex === 0 && index === 0 ? 'bg-white/12 border-white/20' : 'bg-white/5 border-white/5 hover:bg-white/10'}`}
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <span className="w-3 h-3 shrink-0 rounded-full" style={{ backgroundColor: event.color || categoryLegend[event.category]?.color || '#60a5fa' }} />
+                                            <span className="text-xs uppercase tracking-widest text-white/40">{formatEventDate(event.date, settings)}</span>
+                                        </div>
+                                        <div className="mt-3 text-lg font-semibold text-white">{event.title}</div>
+                                        {event.description && <p className="mt-2 line-clamp-3 text-sm text-white/50">{event.description}</p>}
+                                    </button>
+                                ))}
+                            </div>
+                        </section>
+                    ))}
+                </div>
+            </div>
+        );
+    };
+
+    const renderStatsView = () => {
+        const stats = buildStats(events, currentDate);
+        const maxLoad = Math.max(1, ...stats.days.map(day => day.load));
+        const totalEvents = Object.values(stats.byCategory).reduce((sum, count) => sum + count, 0);
+        const totalHours = Math.round(stats.days.reduce((sum, day) => sum + day.load, 0) / 60);
+        const busiestDay = stats.days.reduce((best, day) => day.load > best.load ? day : best, stats.days[0]);
+        const maxCategory = Math.max(1, ...Object.values(stats.byCategory));
+        return (
+            <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-6">
+                <div className="grid grid-cols-3 gap-3">
+                    <div className="rounded-xl border border-white/5 bg-white/[0.06] p-4">
+                        <div className="text-xs uppercase tracking-widest text-white/35">Événements</div>
+                        <div className="mt-2 text-3xl font-bold text-white">{totalEvents}</div>
+                    </div>
+                    <div className="rounded-xl border border-white/5 bg-white/[0.06] p-4">
+                        <div className="text-xs uppercase tracking-widest text-white/35">Charge</div>
+                        <div className="mt-2 text-3xl font-bold text-white">{totalHours} h</div>
+                    </div>
+                    <div className="rounded-xl border border-white/5 bg-white/[0.06] p-4">
+                        <div className="text-xs uppercase tracking-widest text-white/35">Jour le plus dense</div>
+                        <div className="mt-2 text-lg font-semibold text-white">
+                            {new Date(busiestDay.date).toLocaleDateString('fr-FR', { weekday: 'long' })}
+                        </div>
+                    </div>
+                </div>
+
+                <div>
+                    <h3 className="text-sm uppercase tracking-widest text-white/40 mb-3">Charge de la semaine</h3>
+                    <div className="grid grid-cols-7 gap-2 rounded-2xl border border-white/5 bg-black/20 p-3">
+                        {stats.days.map(day => (
+                            <div key={day.date} className="rounded-xl border border-white/5 bg-white/5 p-3 min-h-32 flex flex-col justify-between">
+                                <div>
+                                    <span className="text-xs text-white/40">{new Date(day.date).toLocaleDateString('fr-FR', { weekday: 'short' })}</span>
+                                    <div className="mt-1 text-sm font-semibold text-white">{new Date(day.date).getDate()}</div>
+                                </div>
+                                <div
+                                    className="h-14 rounded-lg transition-all shadow-inner"
+                                    style={{
+                                        backgroundColor: `rgba(59, 130, 246, ${0.15 + (day.load / maxLoad) * 0.65})`,
+                                        boxShadow: day.load ? 'inset 0 0 22px rgba(255,255,255,0.08)' : undefined,
+                                    }}
+                                />
+                                <span className="text-xs text-white/70">{Math.round(day.load / 60)} h · {day.count}</span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+                <div>
+                    <h3 className="text-sm uppercase tracking-widest text-white/40 mb-3">Répartition</h3>
+                    <div className="grid gap-3">
+                        {Object.entries(categoryLegend).map(([key, meta]) => (
+                            <div key={key} className="rounded-xl border border-white/5 bg-white/5 p-3">
+                                <div className="flex items-center justify-between gap-3">
+                                    <div className="flex min-w-0 items-center gap-2">
+                                        <span className="w-2.5 h-2.5 shrink-0 rounded-full" style={{ backgroundColor: meta.color }} />
+                                        <span className="truncate text-sm text-white">{meta.label}</span>
+                                    </div>
+                                    <span className="text-sm font-semibold text-white/80">{stats.byCategory[key] || 0}</span>
+                                </div>
+                                <div className="mt-3 h-2 rounded-full bg-white/5 overflow-hidden">
+                                    <div
+                                        className="h-full rounded-full"
+                                        style={{
+                                            width: `${((stats.byCategory[key] || 0) / maxCategory) * 100}%`,
+                                            backgroundColor: meta.color,
+                                        }}
+                                    />
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
     const { events: selectedEvents, holiday: selectedHoliday } = useMemo(() => {
         const day = selectedDate.getDate();
         const dEvents = getOccurrencesOnDate(events, selectedDate);
@@ -493,6 +752,9 @@ export default function CalendarView({ events, onAddEvent, onEditEvent, onDelete
                 {view === 'month' && renderMonthView()}
                 {view === 'week' && renderWeekView()}
                 {view === 'day' && renderDayView()}
+                {view === 'agenda' && renderAgendaView()}
+                {view === 'focus' && renderFocusView()}
+                {view === 'stats' && renderStatsView()}
             </div>
 
             {/* Day Details Panel - Hide in Day View to avoid duplication, OR keep it? 
@@ -500,7 +762,7 @@ export default function CalendarView({ events, onAddEvent, onEditEvent, onDelete
                 Actually, the Day View above is just a center list. 
                 Let's hide the side panel in Day View to give more space.
             */}
-            {view !== 'day' && (
+            {!['day', 'agenda', 'focus', 'stats'].includes(view) && (
                 <DayDetails
                     date={selectedDate}
                     events={selectedEvents}
