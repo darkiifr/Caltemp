@@ -1,0 +1,25 @@
+{
+  "id": "com.caltemp.examples.youtube-theme",
+  "name": "Thème YouTube",
+  "type": "theme",
+  "version": "1.0.0",
+  "sdkVersion": "1.1.0",
+  "compatibility": {
+    "caltemp": ">=6.0.0"
+  },
+  "description": "Exemple de thème rouge, noir et blanc inspiré de l'identité YouTube.",
+  "author": "Caltemp",
+  "license": "MIT",
+  "repository": "https://github.com/darkiifr/Caltemp",
+  "permissions": [],
+  "theme": {
+    "variables": {
+      "--caltemp-accent": "#ff0033",
+      "--caltemp-panel": "rgba(15, 15, 15, 0.82)",
+      "--caltemp-panel-strong": "rgba(3, 3, 3, 0.94)",
+      "--caltemp-text": "#ffffff",
+      "--caltemp-muted": "#aaaaaa",
+      "--caltemp-border": "rgba(255, 255, 255, 0.12)"
+    }
+  }
+}

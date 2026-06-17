@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Command, Search, BellOff, CalendarPlus, Download, Focus, PanelTopOpen } from 'lucide-react';
+import { Command, Search, BellOff, CalendarPlus, Download, Focus } from 'lucide-react';
 
 export default function CommandPalette({ isOpen, onClose, actions = [] }) {
   const [query, setQuery] = useState('');
@@ -15,7 +15,6 @@ export default function CommandPalette({ isOpen, onClose, actions = [] }) {
     if (id.includes('event')) return <CalendarPlus size={16} />;
     if (id.includes('export')) return <Download size={16} />;
     if (id.includes('silent')) return <BellOff size={16} />;
-    if (id.includes('mini')) return <PanelTopOpen size={16} />;
     if (id.includes('focus')) return <Focus size={16} />;
     return <Command size={16} />;
   };

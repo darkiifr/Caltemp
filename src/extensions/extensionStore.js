@@ -2,6 +2,7 @@ import {
   BaseDirectory,
   exists,
   mkdir,
+  readDir,
   readTextFile,
   remove,
   writeTextFile,
@@ -12,31 +13,42 @@ import { validateExtensionManifest } from './manifest.js';
 const EXTENSIONS_DIR = 'extensions';
 const EXTENSIONS_INDEX = `${EXTENSIONS_DIR}/extensions.json`;
 
-async function ensureExtensionsDir() {
-  const dirExists = await exists(EXTENSIONS_DIR, { baseDir: BaseDirectory.AppData });
+const defaultFs = {
+  exists,
+  mkdir,
+  readDir,
+  readTextFile,
+  remove,
+  writeTextFile,
+};
+
+function appDataOptions(options = {}) {
+  return { baseDir: BaseDirectory.AppData, ...options };
+}
+
+async function ensureExtensionsDir(fs) {
+  const dirExists = await fs.exists(EXTENSIONS_DIR, appDataOptions());
   if (!dirExists) {
-    await mkdir(EXTENSIONS_DIR, { baseDir: BaseDirectory.AppData, recursive: true });
+    await fs.mkdir(EXTENSIONS_DIR, appDataOptions({ recursive: true }));
   }
 }
 
-async function readIndex() {
-  await ensureExtensionsDir();
-  const hasIndex = await exists(EXTENSIONS_INDEX, { baseDir: BaseDirectory.AppData });
+async function readIndex(fs) {
+  await ensureExtensionsDir(fs);
+  const hasIndex = await fs.exists(EXTENSIONS_INDEX, appDataOptions());
   if (!hasIndex) return { installed: [] };
 
   try {
-    return JSON.parse(await readTextFile(EXTENSIONS_INDEX, { baseDir: BaseDirectory.AppData }));
+    return JSON.parse(await fs.readTextFile(EXTENSIONS_INDEX, appDataOptions()));
   } catch (error) {
     console.error('Extensions index invalide:', error);
     return { installed: [] };
   }
 }
 
-async function writeIndex(index) {
-  await ensureExtensionsDir();
-  await writeTextFile(EXTENSIONS_INDEX, JSON.stringify(index, null, 2), {
-    baseDir: BaseDirectory.AppData,
-  });
+async function writeIndex(fs, index) {
+  await ensureExtensionsDir(fs);
+  await fs.writeTextFile(EXTENSIONS_INDEX, JSON.stringify(index, null, 2), appDataOptions());
 }
 
 async function readTextUrl(url) {
@@ -63,29 +75,81 @@ async function validateChecksum(text, expectedSha256) {
 }
 
 export class ExtensionStore {
+  constructor({ fs = defaultFs } = {}) {
+    this.fs = fs;
+  }
+
   async listInstalled() {
-    const index = await readIndex();
-    const records = [];
+    const index = await readIndex(this.fs);
+    const indexedById = new Map((index.installed || []).map((item) => [item.id, item]));
+    const extensionIds = [];
+    const seen = new Set();
 
     for (const item of index.installed || []) {
+      if (item?.id && !seen.has(item.id)) {
+        extensionIds.push(item.id);
+        seen.add(item.id);
+      }
+    }
+
+    for (const item of await this.scanExtensionDirectories()) {
+      if (item.id && !seen.has(item.id)) {
+        extensionIds.push(item.id);
+        seen.add(item.id);
+      }
+    }
+
+    const records = [];
+
+    for (const extensionId of extensionIds) {
       try {
-        const basePath = `${EXTENSIONS_DIR}/${item.id}`;
-        const manifest = JSON.parse(
-          await readTextFile(`${basePath}/manifest.json`, { baseDir: BaseDirectory.AppData }),
-        );
+        const item = indexedById.get(extensionId) || {
+          id: extensionId,
+          enabled: false,
+          source: 'local-detected',
+        };
+        const basePath = `${EXTENSIONS_DIR}/${extensionId}`;
+        const manifest = await this.readManifest(extensionId);
         let entryCode = '';
         if (manifest.entry) {
-          entryCode = await readTextFile(`${basePath}/${manifest.entry}`, {
-            baseDir: BaseDirectory.AppData,
-          });
+          entryCode = await this.fs.readTextFile(`${basePath}/${manifest.entry}`, appDataOptions());
         }
         records.push({ ...item, manifest, entryCode });
       } catch (error) {
-        console.error(`Extension ignorée (${item.id}):`, error);
+        console.error(`Extension ignorée (${extensionId}):`, error);
       }
     }
 
     return records;
+  }
+
+  async scanExtensionDirectories() {
+    await ensureExtensionsDir(this.fs);
+    let entries = [];
+    try {
+      entries = await this.fs.readDir(EXTENSIONS_DIR, appDataOptions());
+    } catch {
+      return [];
+    }
+
+    const directories = entries.filter((entry) => entry.isDirectory !== false && entry.name);
+    const found = [];
+
+    for (const entry of directories) {
+      const manifestPath = `${EXTENSIONS_DIR}/${entry.name}/manifest.json`;
+      if (await this.fs.exists(manifestPath, appDataOptions())) {
+        found.push({ id: entry.name });
+      }
+    }
+
+    return found;
+  }
+
+  async readManifest(extensionId) {
+    const manifest = JSON.parse(
+      await this.fs.readTextFile(`${EXTENSIONS_DIR}/${extensionId}/manifest.json`, appDataOptions()),
+    );
+    return validateExtensionManifest(manifest);
   }
 
   async installFromRegistryEntry(entry) {
@@ -93,20 +157,16 @@ export class ExtensionStore {
     const manifest = validateExtensionManifest(JSON.parse(manifestText));
     const basePath = `${EXTENSIONS_DIR}/${manifest.id}`;
 
-    await mkdir(basePath, { baseDir: BaseDirectory.AppData, recursive: true });
-    await writeTextFile(`${basePath}/manifest.json`, JSON.stringify(manifest, null, 2), {
-      baseDir: BaseDirectory.AppData,
-    });
+    await this.fs.mkdir(basePath, appDataOptions({ recursive: true }));
+    await this.fs.writeTextFile(`${basePath}/manifest.json`, JSON.stringify(manifest, null, 2), appDataOptions());
 
     if (manifest.type === 'plugin') {
       const code = await readTextUrl(entry.assetUrl);
       await validateChecksum(code, entry.sha256);
-      await writeTextFile(`${basePath}/${manifest.entry}`, code, {
-        baseDir: BaseDirectory.AppData,
-      });
+      await this.fs.writeTextFile(`${basePath}/${manifest.entry}`, code, appDataOptions());
     }
 
-    const index = await readIndex();
+    const index = await readIndex(this.fs);
     const installed = (index.installed || []).filter((item) => item.id !== manifest.id);
     installed.push({
       id: manifest.id,
@@ -115,26 +175,88 @@ export class ExtensionStore {
       installedVersion: manifest.version,
       installedAt: new Date().toISOString(),
     });
-    await writeIndex({ installed });
+    await writeIndex(this.fs, { installed });
+    if (manifest.type === 'theme') {
+      await this.setEnabled(manifest.id, true);
+    }
+    return manifest;
+  }
+
+  async installFromLocalExample(example) {
+    const manifest = validateExtensionManifest(JSON.parse(example.manifestText));
+    const basePath = `${EXTENSIONS_DIR}/${manifest.id}`;
+
+    await this.fs.mkdir(basePath, appDataOptions({ recursive: true }));
+    await this.fs.writeTextFile(`${basePath}/manifest.json`, JSON.stringify(manifest, null, 2), appDataOptions());
+
+    if (manifest.type === 'plugin') {
+      if (!example.entryCode) {
+        throw new Error(`L'exemple ${manifest.id} ne contient pas le bundle ${manifest.entry}.`);
+      }
+      await this.fs.writeTextFile(`${basePath}/${manifest.entry}`, example.entryCode, appDataOptions());
+    }
+
+    const index = await readIndex(this.fs);
+    const installed = (index.installed || []).filter((item) => item.id !== manifest.id);
+    installed.push({
+      id: manifest.id,
+      enabled: true,
+      source: example.source || 'bundled-example',
+      installedVersion: manifest.version,
+      installedAt: new Date().toISOString(),
+    });
+    await writeIndex(this.fs, { installed });
+    if (manifest.type === 'theme') {
+      await this.setEnabled(manifest.id, true);
+    }
     return manifest;
   }
 
   async removeExtension(extensionId) {
-    const index = await readIndex();
+    const index = await readIndex(this.fs);
     const installed = (index.installed || []).filter((item) => item.id !== extensionId);
-    await writeIndex({ installed });
+    await writeIndex(this.fs, { installed });
 
     const path = `${EXTENSIONS_DIR}/${extensionId}`;
-    if (await exists(path, { baseDir: BaseDirectory.AppData })) {
-      await remove(path, { baseDir: BaseDirectory.AppData, recursive: true });
+    if (await this.fs.exists(path, appDataOptions())) {
+      await this.fs.remove(path, appDataOptions({ recursive: true }));
     }
   }
 
   async setEnabled(extensionId, enabled) {
-    const index = await readIndex();
-    const installed = (index.installed || []).map((item) =>
-      item.id === extensionId ? { ...item, enabled } : item,
-    );
-    await writeIndex({ installed });
+    const manifest = await this.readManifest(extensionId);
+    const index = await readIndex(this.fs);
+    const installed = [...(index.installed || [])];
+    const existingIndex = installed.findIndex((item) => item.id === extensionId);
+
+    const nextEntry = {
+      ...(existingIndex >= 0 ? installed[existingIndex] : {}),
+      id: extensionId,
+      enabled,
+      source: existingIndex >= 0 ? installed[existingIndex].source : 'local-detected',
+      installedVersion: manifest.version,
+      installedAt: existingIndex >= 0 ? installed[existingIndex].installedAt : new Date().toISOString(),
+    };
+
+    if (existingIndex >= 0) {
+      installed[existingIndex] = nextEntry;
+    } else {
+      installed.push(nextEntry);
+    }
+
+    if (enabled && manifest.type === 'theme') {
+      const themeIds = new Set(
+        (await this.listInstalled())
+          .filter((record) => record.manifest.type === 'theme')
+          .map((record) => record.manifest.id),
+      );
+      for (const item of installed) {
+        if (item.id !== extensionId && themeIds.has(item.id)) {
+          item.enabled = false;
+        }
+      }
+    }
+
+    await writeIndex(this.fs, { installed });
   }
 }

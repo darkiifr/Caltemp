@@ -69,22 +69,6 @@ body {
   flex-direction: column;
 }
 
-html[data-caltemp-window="mini"],
-html[data-caltemp-window="mini"] body,
-html[data-caltemp-window="mini"] #root {
-  background: #101010 !important;
-  color: #f8fafc !important;
-}
-
-html[data-caltemp-window="mini"] {
-  --background: #101010;
-  --foreground: #f8fafc;
-  --card: #141414;
-  --card-foreground: #f8fafc;
-  --popover: #141414;
-  --popover-foreground: #f8fafc;
-}
-
 /* Custom Scrollbar */
 ::-webkit-scrollbar {
   width: 8px;

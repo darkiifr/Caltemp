@@ -4,10 +4,7 @@ import App from "./App";
 import "@fontsource-variable/geist";
 import "./App.css";
 
-const isMiniWindow = new URLSearchParams(window.location.search).get('mini') === '1'
-  || window.location.hash.includes('mini');
-
-document.documentElement.dataset.caltempWindow = isMiniWindow ? 'mini' : 'main';
+document.documentElement.dataset.caltempWindow = 'main';
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>

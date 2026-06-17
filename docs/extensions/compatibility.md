@@ -1,6 +1,6 @@
 # Compatibilité
 
-Caltemp v6 expose le SDK `1.0.0`.
+Caltemp v6 expose le SDK `1.1.0`.
 
 Règles:
 

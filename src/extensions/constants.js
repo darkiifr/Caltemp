@@ -1,4 +1,4 @@
-export const CALTEMP_SDK_VERSION = '1.0.0';
+export const CALTEMP_SDK_VERSION = '1.1.0';
 export const CALTEMP_MIN_COMPAT_VERSION = '6.0.0';
 
 export const DEFAULT_EXTENSION_REGISTRY_URL =

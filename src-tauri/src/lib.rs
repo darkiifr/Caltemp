@@ -1,7 +1,6 @@
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, TrayIconBuilder, TrayIconEvent};
-use tauri::webview::Color;
-use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::Manager;
 use std::sync::Mutex;
 use discord_rich_presence::{activity, DiscordIpc, DiscordIpcClient};
 use serde::Deserialize;
@@ -184,47 +183,6 @@ fn write_portable_data_file(file_name: String, content: String) -> Result<(), St
     std::fs::write(dir.join(file_name), content).map_err(|error| error.to_string())
 }
 
-#[tauri::command]
-fn toggle_mini_calendar(app: tauri::AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window("mini-calendar") {
-        if window.is_visible().unwrap_or(false) {
-            window.hide().map_err(|error| error.to_string())?;
-        } else {
-            window.show().map_err(|error| error.to_string())?;
-            window.set_focus().map_err(|error| error.to_string())?;
-        }
-        return Ok(());
-    }
-
-    let window = WebviewWindowBuilder::new(
-        &app,
-        "mini-calendar",
-        WebviewUrl::App("/?mini=1#mini-calendar".into()),
-    )
-    .title("Caltemp mini")
-    .inner_size(320.0, 520.0)
-    .resizable(false)
-    .decorations(false)
-    .transparent(false)
-    .background_color(Color(16, 16, 16, 255))
-    .always_on_top(true)
-    .build()
-    .map_err(|error| error.to_string())?;
-
-    window.set_focus().map_err(|error| error.to_string())?;
-    Ok(())
-}
-
-#[tauri::command]
-fn set_mini_calendar_always_on_top(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window("mini-calendar") {
-        window
-            .set_always_on_top(enabled)
-            .map_err(|error| error.to_string())?;
-    }
-    Ok(())
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -303,9 +261,7 @@ pub fn run() {
             write_portable_data_file,
             set_window_effect,
             discord_rpc_update,
-            discord_rpc_clear,
-            toggle_mini_calendar,
-            set_mini_calendar_always_on_top
+            discord_rpc_clear
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

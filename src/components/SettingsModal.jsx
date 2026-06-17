@@ -35,9 +35,11 @@ export default function SettingsModal({
     events,
     onImportEvents,
     osType,
+    initialActiveTab = 'general',
     installedExtensions = [],
     extensionErrors = [],
     onRefreshExtensions,
+    onRequestRestart,
 }) {
     const [activeTab, setActiveTab] = useState('general');
     const [appVersion, setAppVersion] = useState('Unknown');
@@ -73,6 +75,7 @@ export default function SettingsModal({
 
     useEffect(() => {
         if (isOpen) {
+            setActiveTab(initialActiveTab || 'general');
 
             setLocalSettings({ ...settings, customModels: settings.customModels || [] });
             setIsSavingSettings(false);
@@ -102,7 +105,7 @@ export default function SettingsModal({
                         });
                 });
         }
-    }, [isOpen, settings]);
+    }, [initialActiveTab, isOpen, settings]);
 
     const handleChange = (key, value) => {
         const previewSettings = { ...localSettings, [key]: value };
@@ -1159,6 +1162,7 @@ export default function SettingsModal({
                                     installedExtensions={installedExtensions}
                                     extensionErrors={extensionErrors}
                                     onRefreshExtensions={onRefreshExtensions}
+                                    onRequestRestart={onRequestRestart}
                                 />
                             )}
                         </div>

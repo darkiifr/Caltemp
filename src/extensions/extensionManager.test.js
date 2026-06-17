@@ -90,4 +90,40 @@ describe('ExtensionManager', () => {
     await expect(manager.initialize()).resolves.not.toThrow();
     expect(manager.getErrors()[0].message).toMatch(/calendar:write/i);
   });
+
+  it('exposes a host-backed gallery UI method to plugins', async () => {
+    const openGallery = vi.fn();
+    const gallery = {
+      title: 'Galerie Bleus',
+      description: 'Photos de footballeurs français',
+      items: [{ name: 'Kylian Mbappé', imageUrl: 'https://example.com/mbappe.jpg' }],
+    };
+    const manager = new ExtensionManager({
+      host: { openGallery },
+      store: {
+        listInstalled: async () => [
+          {
+            enabled: true,
+            manifest: {
+              id: 'com.caltemp.plugin.gallery',
+              name: 'Gallery plugin',
+              type: 'plugin',
+              version: '1.0.0',
+              sdkVersion: '1.1.0',
+              compatibility: { caltemp: '>=6.0.0' },
+              entry: 'index.js',
+              permissions: [],
+            },
+          },
+        ],
+      },
+      loadPluginModule: async () => ({
+        activate: (ctx) => ctx.ui.openGallery(gallery),
+      }),
+    });
+
+    await manager.initialize();
+
+    expect(openGallery).toHaveBeenCalledWith(gallery);
+  });
 });

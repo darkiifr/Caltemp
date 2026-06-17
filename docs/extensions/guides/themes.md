@@ -13,3 +13,7 @@ Les thèmes Caltemp v1 sont déclaratifs. Ils modifient l’apparence via `theme
 - Gardez un contraste lisible sur les fonds sombres.
 - Préférez quelques variables cohérentes à une palette trop large.
 - Ne dépendez pas de classes internes Tailwind: elles peuvent changer.
+
+## Exemple
+
+`examples/extensions/youtube-theme` montre un thème déclaratif rouge, noir et blanc inspiré de YouTube.

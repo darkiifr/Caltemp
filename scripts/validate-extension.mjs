@@ -5,6 +5,8 @@ import { validateExtensionManifest } from '../src/extensions/manifest.js';
 const roots = [
   'examples/extensions/minimal-plugin/manifest.json',
   'examples/extensions/minimal-theme/manifest.json',
+  'examples/extensions/youtube-theme/manifest.json',
+  'examples/extensions/french-football-gallery/manifest.json',
 ];
 
 let failures = 0;

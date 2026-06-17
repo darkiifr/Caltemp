@@ -8,7 +8,7 @@ Le manifest décrit l’extension et son contrat de compatibilité.
   "name": "Nom lisible",
   "type": "plugin",
   "version": "1.0.0",
-  "sdkVersion": "1.0.0",
+  "sdkVersion": "1.1.0",
   "compatibility": { "caltemp": ">=6.0.0" },
   "description": "Description courte",
   "author": "Auteur",

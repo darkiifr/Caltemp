@@ -1,0 +1,16 @@
+{
+  "id": "com.caltemp.examples.french-football-gallery",
+  "name": "Galerie Bleus",
+  "type": "plugin",
+  "version": "1.0.0",
+  "sdkVersion": "1.1.0",
+  "compatibility": {
+    "caltemp": ">=6.0.0"
+  },
+  "description": "Exemple de plugin qui affiche une galerie de footballeurs français connus dans une modal Caltemp.",
+  "author": "Caltemp",
+  "license": "MIT",
+  "repository": "https://github.com/darkiifr/Caltemp",
+  "entry": "index.js",
+  "permissions": []
+}

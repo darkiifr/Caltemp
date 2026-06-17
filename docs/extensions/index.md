@@ -15,5 +15,5 @@ Caltemp expose un SDK v1 pour créer des thèmes et plugins sûrs. Les extension
 - Les plugins sont des modules ESM exportant `activate(ctx)` et, optionnellement, `deactivate(ctx)`.
 - Les plugins n’ont pas accès directement aux APIs Tauri, au système de fichiers ou au shell.
 - Toutes les capacités sensibles passent par des permissions déclarées.
-- La compatibilité SDK courante est `1.0.0`.
+- La compatibilité SDK courante est `1.1.0`.
 - La Rich Presence Discord est une intégration Caltemp native, pas une API plugin v1.

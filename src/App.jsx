@@ -4,6 +4,7 @@ import { isPermissionGranted, requestPermission, sendNotification } from '@tauri
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { invoke } from '@tauri-apps/api/core';
 import { type } from '@tauri-apps/plugin-os';
+import { relaunch } from '@tauri-apps/plugin-process';
 import CalendarView from "./components/CalendarView";
 import EventModal from "./components/EventModal";
 import SettingsModal from "./components/SettingsModal";
@@ -13,11 +14,12 @@ import Titlebar from "./components/Titlebar";
 import ContextMenu from "./components/ContextMenu";
 import NotificationToast from "./components/NotificationToast";
 import CommandPalette from "./components/CommandPalette";
-import MiniCalendar from "./components/MiniCalendar";
+import ExtensionGalleryModal from "./components/ExtensionGalleryModal";
 import "./App.css";
 import { loadEvents, saveEvents, loadSettings, saveSettings } from "./services/fileManager";
 import { ExtensionManager, ExtensionStore } from "./extensions";
 import { clearDiscordPresence, updateDiscordPresence } from "./services/discordRpc";
+import { consumeRuntimeSession, saveRuntimeSession } from "./services/runtimeSession";
 
 import { playBubbleSound, playRingtone, playNotificationSound, configureSounds, resumeAudioContext } from "./utils/sound";
 import { normalizeEvent, normalizeEvents, normalizeSettings } from "./domain/events";
@@ -26,10 +28,9 @@ import { exportElementAsPdf, exportElementAsPng } from "./utils/exportView";
 import { FastAverageColor } from "fast-average-color";
 
 function App() {
-  const isMiniWindow = new URLSearchParams(window.location.search).get('mini') === '1'
-    || window.location.hash.includes('mini');
   const [events, setEvents] = useState([]);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [settingsInitialTab, setSettingsInitialTab] = useState('general');
   const [isDexterOpen, setIsDexterOpen] = useState(false);
   const [isEventModalOpen, setIsEventModalOpen] = useState(false);
   const [isRemindersOpen, setIsRemindersOpen] = useState(false);
@@ -41,6 +42,8 @@ function App() {
   const [toastNotification, setToastNotification] = useState(null);
   const [silentBadgeCount, setSilentBadgeCount] = useState(0);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  const [extensionActions, setExtensionActions] = useState([]);
+  const [extensionGallery, setExtensionGallery] = useState(null);
   const [installedExtensions, setInstalledExtensions] = useState([]);
   const [extensionErrors, setExtensionErrors] = useState([]);
   const [calendarView, setCalendarView] = useState('month');
@@ -72,7 +75,7 @@ function App() {
     async function initData() {
       try {
         const isTauriRuntime = Boolean(window.__TAURI_INTERNALS__);
-        const os = !isMiniWindow && isTauriRuntime ? await type() : '';
+        const os = isTauriRuntime ? await type() : '';
         setOsType(os);
 
         const [loadedEvents, loadedSettings] = isTauriRuntime
@@ -107,46 +110,53 @@ function App() {
         // If loadedSettings has some keys, they override defaults.
         // We merge defaults first, then loadedSettings.
         const finalSettings = normalizeSettings({ ...defaultSettings, ...loadedSettings });
+        const runtimeSession = isTauriRuntime ? await consumeRuntimeSession() : null;
 
         // Configure sounds
-        if (!isMiniWindow && finalSettings.soundConfig) {
+        if (finalSettings.soundConfig) {
           configureSounds(finalSettings.soundConfig);
         }
 
         setEvents(normalizeEvents(loadedEvents || [], finalSettings));
         setSettings(finalSettings);
+        if (runtimeSession?.calendarView) {
+          setCalendarView(runtimeSession.calendarView);
+        }
+        if (runtimeSession?.selectedDate) {
+          setSelectedDate(new Date(runtimeSession.selectedDate));
+        }
+        if (runtimeSession?.settingsTab) {
+          setSettingsInitialTab(runtimeSession.settingsTab);
+          setIsSettingsOpen(true);
+        }
         setIsLoaded(true);
 
         // Apply window effect on startup
-        if (!isMiniWindow && finalSettings.windowEffect) {
+        if (finalSettings.windowEffect) {
           invoke('set_window_effect', { effect: finalSettings.windowEffect });
         }
 
         // Attempt to resume audio context on first user interaction
-        if (!isMiniWindow) {
-          const resumeAudio = () => {
-            resumeAudioContext();
-            window.removeEventListener('click', resumeAudio);
-            window.removeEventListener('keydown', resumeAudio);
-          };
-          window.addEventListener('click', resumeAudio);
-          window.addEventListener('keydown', resumeAudio);
-        }
+        const resumeAudio = () => {
+          resumeAudioContext();
+          window.removeEventListener('click', resumeAudio);
+          window.removeEventListener('keydown', resumeAudio);
+        };
+        window.addEventListener('click', resumeAudio);
+        window.addEventListener('keydown', resumeAudio);
 
         // Request notification permission
-        if (!isMiniWindow) {
-          let permissionGranted = await isPermissionGranted();
-          if (!permissionGranted) {
-            const permission = await requestPermission();
-            permissionGranted = permission === 'granted';
-          }
+        let permissionGranted = await isPermissionGranted();
+        if (!permissionGranted) {
+          const permission = await requestPermission();
+          permissionGranted = permission === 'granted';
         }
       } catch (error) {
         console.error("Init error:", error);
       }
     }
     initData();
-  }, [isMiniWindow]);
+  }, []);
 
   // Apply font size to root for rem scaling
   useEffect(() => {
@@ -156,7 +166,6 @@ function App() {
   }, [currentSettings.fontSize]);
 
   useEffect(() => {
-    if (isMiniWindow) return;
     if (!currentSettings.appBackground || currentSettings.autoAccentFromBackground === false) return;
     const fac = new FastAverageColor();
     fac.getColorAsync(currentSettings.appBackground, { crossOrigin: 'anonymous' })
@@ -165,9 +174,9 @@ function App() {
       })
       .catch(() => {
         document.documentElement.style.setProperty('--caltemp-accent', '#3b82f6');
-      });
+    });
     return () => fac.destroy();
-  }, [currentSettings.appBackground, currentSettings.autoAccentFromBackground, isMiniWindow]);
+  }, [currentSettings.appBackground, currentSettings.autoAccentFromBackground]);
 
   // Helper for notifications
   const notify = React.useCallback(async (title, body, type = 'info', meta = {}) => {
@@ -209,9 +218,10 @@ function App() {
   }, [settings.notifications, settings.notificationMode]);
 
   const refreshExtensions = useCallback(async () => {
-    if (isMiniWindow) return;
-
     const store = new ExtensionStore();
+    await Promise.resolve();
+    setExtensionActions([]);
+    setExtensionGallery(null);
     const manager = new ExtensionManager({
       store,
       host: {
@@ -247,6 +257,27 @@ function App() {
           manager.emit('calendar:event-deleted', { eventId });
         },
         notify,
+        registerAction: (action) => {
+          if (!action || typeof action.id !== 'string' || typeof action.label !== 'string' || typeof action.run !== 'function') {
+            return () => {};
+          }
+
+          const extensionAction = {
+            id: `extension-${action.id}`,
+            label: action.label,
+            run: action.run,
+          };
+
+          setExtensionActions((current) => [
+            ...current.filter((item) => item.id !== extensionAction.id),
+            extensionAction,
+          ]);
+
+          return () => {
+            setExtensionActions((current) => current.filter((item) => item.id !== extensionAction.id));
+          };
+        },
+        openGallery: (gallery) => setExtensionGallery(gallery),
       },
     });
 
@@ -255,18 +286,28 @@ function App() {
     setInstalledExtensions(manager.getInstalled());
     setExtensionErrors(manager.getErrors());
     manager.emit('app:ready', { version: settingsRef.current?.version });
-  }, [isMiniWindow, notify]);
+  }, [notify]);
 
   useEffect(() => {
-    if (!isLoaded || isMiniWindow) return;
-    refreshExtensions().catch((error) => {
-      console.error('Failed to initialize extensions:', error);
-      setExtensionErrors([{ extensionId: 'runtime', message: error.message }]);
+    if (!isLoaded) return;
+    let cancelled = false;
+
+    queueMicrotask(() => {
+      if (cancelled) return;
+      refreshExtensions().catch((error) => {
+        if (cancelled) return;
+        console.error('Failed to initialize extensions:', error);
+        setExtensionErrors([{ extensionId: 'runtime', message: error.message }]);
+      });
     });
-  }, [isLoaded, isMiniWindow, refreshExtensions]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isLoaded, refreshExtensions]);
 
   useEffect(() => {
-    if (!isLoaded || isMiniWindow) return;
+    if (!isLoaded) return;
 
     if (!currentSettings.discordRpcEnabled) {
       clearDiscordPresence();
@@ -280,14 +321,12 @@ function App() {
     currentSettings.discordRpcEnabled,
     isDexterOpen,
     isLoaded,
-    isMiniWindow,
     isSettingsOpen,
     startedAt,
   ]);
 
   // Check for reminders dynamically to save battery when in background
   useEffect(() => {
-    if (isMiniWindow) return;
     let timeoutId;
     
     const checkReminders = () => {
@@ -316,7 +355,7 @@ function App() {
     timeoutId = setTimeout(checkReminders, 5000);
 
     return () => clearTimeout(timeoutId);
-  }, [events, isLoaded, settings, notify, isMiniWindow]);
+  }, [events, isLoaded, settings, notify]);
 
   const handleAddEvent = useCallback((date) => {
     setSelectedDate(date);
@@ -408,7 +447,10 @@ function App() {
     {
       id: 'import-ics',
       label: 'Importer un fichier ICS',
-      run: () => setIsSettingsOpen(true),
+      run: () => {
+        setSettingsInitialTab('general');
+        setIsSettingsOpen(true);
+      },
     },
     {
       id: 'toggle-silent',
@@ -421,11 +463,6 @@ function App() {
         setSettings(next);
         await saveSettings(next);
       },
-    },
-    {
-      id: 'mini-calendar',
-      label: 'Ouvrir le mini-calendrier',
-      run: () => invoke('toggle_mini_calendar').catch(console.error),
     },
     {
       id: 'export-png',
@@ -454,7 +491,17 @@ function App() {
         });
       },
     }))),
-  ], [settings, handleAddEvent, handleSaveEvent]);
+    ...extensionActions,
+  ], [settings, handleAddEvent, handleSaveEvent, extensionActions]);
+
+  const handleRestartApp = useCallback(async () => {
+    await saveRuntimeSession({
+      settingsTab: 'extensions',
+      calendarView,
+      selectedDate: selectedDate instanceof Date ? selectedDate.toISOString() : null,
+    });
+    await relaunch();
+  }, [calendarView, selectedDate]);
   
   const appBgStyle = isBackgroundActive ? {
     backgroundImage: `url(${currentSettings.appBackground})`,
@@ -466,10 +513,6 @@ function App() {
   // If we have a window effect (vibrancy/mica), we MUST be transparent.
   // Otherwise, if background is disabled, we show solid dark.
   const isTransparent = (currentSettings.windowEffect && currentSettings.windowEffect !== 'none') || isBackgroundActive;
-
-  if (isMiniWindow) {
-    return <MiniCalendar events={events} settings={currentSettings} />;
-  }
 
   return (
     <div
@@ -522,7 +565,7 @@ function App() {
           </button>
 
           <button
-            onClick={() => { playBubbleSound(); setIsSettingsOpen(true); }}
+            onClick={() => { playBubbleSound(); setSettingsInitialTab('general'); setIsSettingsOpen(true); }}
             className="p-3 rounded-xl hover:bg-white/10 text-white/50 hover:text-white transition-all"
           >
             <Settings size={24} />
@@ -585,10 +628,12 @@ function App() {
         isOpen={isSettingsOpen}
         events={events}
         osType={osType}
+        initialActiveTab={settingsInitialTab}
         onImportEvents={handleImportEvents}
         installedExtensions={installedExtensions}
         extensionErrors={extensionErrors}
         onRefreshExtensions={refreshExtensions}
+        onRequestRestart={handleRestartApp}
         onClose={() => {
           setPreviewSettings(null);
           // Revert window effect if needed
@@ -633,6 +678,11 @@ function App() {
         isOpen={isCommandPaletteOpen}
         onClose={() => setIsCommandPaletteOpen(false)}
         actions={commandActions}
+      />
+
+      <ExtensionGalleryModal
+        gallery={extensionGallery}
+        onClose={() => setExtensionGallery(null)}
       />
 
       <RemindersModal

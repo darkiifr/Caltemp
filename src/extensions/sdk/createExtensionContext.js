@@ -72,6 +72,7 @@ export function createExtensionContext({
     },
     ui: {
       registerAction: host.registerAction || (() => {}),
+      openGallery: host.openGallery || (() => {}),
     },
     logger: {
       debug: (...args) => logger.debug?.(`[${extensionId}]`, ...args),
