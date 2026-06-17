@@ -1,0 +1,18 @@
+Deck: Caltemp v6.0.0
+Audience: utilisateurs finaux
+Profile: product-platform
+
+Visual system:
+- Dark product surface inspired by the app, with graphite background, blue accent, green status accents, and white typography.
+- Native editable text, rectangles, lines, and simple data diagrams only.
+- No official logo, partner logo, mascot, or fabricated brand mark.
+
+Macro layout plan:
+1. Cover with product promise and compact metric rail.
+2. Day timeline with side event summary.
+3. ICS source pipeline with compact source rows.
+4. Notification workflow with snooze/silent grouping.
+5. Organization matrix for categories, routines, todos, exams.
+6. Dexter conversation plus deterministic command cards.
+7. Privacy architecture map.
+8. Security and next-steps roadmap.
