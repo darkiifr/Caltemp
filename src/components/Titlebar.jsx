@@ -3,9 +3,9 @@ import { X, Minus, Square } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
 export default function Titlebar({ style = 'macos', osType }) {
-    const appWindow = getCurrentWindow();
-
     if (style === 'none') return null;
+
+    const appWindow = () => getCurrentWindow();
 
     const getTitle = () => {
         if (!osType) return 'Caltemp';
@@ -15,17 +15,22 @@ export default function Titlebar({ style = 'macos', osType }) {
 
     const handleClose = async (e) => {
         e.stopPropagation();
-        await appWindow.close();
+        await appWindow().close();
     };
 
     const handleMinimize = async (e) => {
         e.stopPropagation();
-        await appWindow.minimize();
+        await appWindow().minimize();
     };
 
     const handleMaximize = async (e) => {
         e.stopPropagation();
-        await appWindow.toggleMaximize();
+        await appWindow().toggleMaximize();
+    };
+
+    const handleTitlebarDoubleClick = async (e) => {
+        if (e.target.closest('button')) return;
+        await appWindow().toggleMaximize();
     };
 
     // macOS style: rounded buttons on the left
@@ -33,6 +38,7 @@ export default function Titlebar({ style = 'macos', osType }) {
         return (
             <div
                 data-tauri-drag-region
+                onDoubleClick={handleTitlebarDoubleClick}
                 className="h-10 w-full bg-[#1e1e1e]/90 backdrop-blur-md border-b border-white/5 flex items-center select-none transition-colors duration-300 px-4 justify-between relative z-50 cursor-default"
             >
                 <div className="flex gap-2.5 relative z-50" onMouseDown={(e) => e.stopPropagation()}>
@@ -71,6 +77,7 @@ export default function Titlebar({ style = 'macos', osType }) {
         return (
             <div
                 data-tauri-drag-region
+                onDoubleClick={handleTitlebarDoubleClick}
                 className="h-8 w-full bg-[#1e1e1e]/80 backdrop-blur-md border-b border-white/10 flex items-center select-none transition-colors duration-300 relative z-50 cursor-default"
             >
                 <div className="flex-1 px-4 pointer-events-none">

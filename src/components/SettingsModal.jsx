@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Monitor, Cpu, Info, Check, RefreshCw, Layout, Download, Upload, Coffee, Image as ImageIcon, Search } from 'lucide-react';
+import { X, Monitor, Cpu, Info, Check, RefreshCw, Layout, Download, Upload, Coffee, Image as ImageIcon, Search, Puzzle } from 'lucide-react';
 import { getVersion } from '@tauri-apps/plugin-app';
 import { check } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
@@ -13,6 +13,7 @@ import { enable, disable, isEnabled } from '@tauri-apps/plugin-autostart';
 import { playBubbleSound, playRingtone, playNotificationSound } from '../utils/sound';
 import { generateICS, parseICS } from '../utils/ics';
 import { writeTextFile, readTextFile } from '@tauri-apps/plugin-fs';
+import MarketplacePanel from './MarketplacePanel';
 
 const DEFAULT_MODELS = [
     { id: 'mistralai/mistral-7b-instruct', name: 'Mistral 7B (Gratuit)' },
@@ -22,7 +23,7 @@ const DEFAULT_MODELS = [
     { id: 'google/gemini-pro', name: 'Gemini Pro' },
 ];
 
-export default function SettingsModal({ isOpen, onClose, settings, onSave, onPreview, events, onImportEvents, osType }) {
+export default function SettingsModal({ isOpen, onClose, settings, onSave, onPreview, events, onImportEvents, osType, installedExtensions = [], extensionErrors = [], onRefreshExtensions }) {
     const [activeTab, setActiveTab] = useState('general');
     const [appVersion, setAppVersion] = useState('Unknown');
     const [updateStatus, setUpdateStatus] = useState(null);
@@ -330,6 +331,7 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave, onPre
         { id: 'appearance', label: 'Apparence', icon: Layout },
         { id: 'sounds', label: 'Sons', icon: Volume2 },
         { id: 'ai', label: 'Intelligence Artificielle', icon: Cpu },
+        { id: 'extensions', label: 'Extensions', icon: Puzzle },
         { id: 'background', label: 'Fond de l\'app', icon: ImageIcon },
         { id: 'about', label: 'À propos', icon: Info },
     ];
@@ -337,7 +339,7 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave, onPre
     return (
         <>
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200 p-4">
-                <div className="bg-[#1e1e1e] w-full max-w-[800px] h-full max-h-[600px] rounded-2xl shadow-2xl border border-white/10 flex overflow-hidden animate-in zoom-in-95 duration-200">
+                <div className="bg-[#1e1e1e] w-full max-w-[800px] h-full max-h-[600px] rounded-2xl shadow-2xl border border-white/10 flex overflow-hidden animate-control-panel">
 
                     {/* Sidebar */}
                     <div className="w-64 bg-[#252525] border-r border-white/5 p-4 flex flex-col gap-2">
@@ -408,6 +410,16 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave, onPre
                                             </div>
                                             <div className={`w-12 h-6 rounded-full transition-colors relative ${localSettings.notifications ? 'bg-blue-600' : 'bg-gray-600'}`} onClick={() => handleChange('notifications', !localSettings.notifications)}>
                                                 <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${localSettings.notifications ? 'left-7' : 'left-1'}`} />
+                                            </div>
+                                        </label>
+
+                                        <label className="flex items-center justify-between p-4 bg-white/5 rounded-xl cursor-pointer hover:bg-white/10 transition-colors">
+                                            <div>
+                                                <div className="font-medium text-white">Présence Discord</div>
+                                                <div className="text-sm text-gray-400">Afficher une activité Caltemp discrète, sans détails personnels.</div>
+                                            </div>
+                                            <div className={`w-12 h-6 rounded-full transition-colors relative ${localSettings.discordRpcEnabled ? 'bg-indigo-600' : 'bg-gray-600'}`} onClick={() => handleChange('discordRpcEnabled', !localSettings.discordRpcEnabled)}>
+                                                <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${localSettings.discordRpcEnabled ? 'left-7' : 'left-1'}`} />
                                             </div>
                                         </label>
 
@@ -691,6 +703,15 @@ export default function SettingsModal({ isOpen, onClose, settings, onSave, onPre
                                         </div>
                                     </div>
                                 </div>
+                            )}
+
+                            {/* --- EXTENSIONS --- */}
+                            {activeTab === 'extensions' && (
+                                <MarketplacePanel
+                                    installedExtensions={installedExtensions}
+                                    extensionErrors={extensionErrors}
+                                    onRefreshExtensions={onRefreshExtensions}
+                                />
                             )}
 
                             {/* --- BACKGROUND (UNSPLASH) --- */}

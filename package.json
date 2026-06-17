@@ -1,14 +1,16 @@
 {
   "name": "caltemp",
   "private": true,
-  "version": "0.1.0",
+  "version": "6.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "test": "vitest run",
+    "extensions:validate": "node scripts/validate-extension.mjs"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.2.8",
@@ -48,11 +50,12 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
-    "@vitejs/plugin-react": "^4.6.0",
+    "@vitejs/plugin-react": "^6.0.2",
     "eslint": "^9.39.2",
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.0.1",
     "globals": "^17.3.0",
-    "vite": "^7.3.2"
+    "vite": "^8.0.16",
+    "vitest": "^4.0.15"
   }
 }

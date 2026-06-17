@@ -1,0 +1,21 @@
+{
+  "id": "com.caltemp.examples.minimal-theme",
+  "name": "Thème minimal cyan",
+  "type": "theme",
+  "version": "1.0.0",
+  "sdkVersion": "1.0.0",
+  "compatibility": {
+    "caltemp": ">=6.0.0"
+  },
+  "description": "Exemple minimal de thème basé sur des variables CSS.",
+  "author": "Caltemp",
+  "license": "MIT",
+  "repository": "https://github.com/darkiifr/Caltemp",
+  "permissions": [],
+  "theme": {
+    "variables": {
+      "--caltemp-accent": "#67e8f9",
+      "--caltemp-panel": "rgba(8, 47, 73, 0.55)"
+    }
+  }
+}

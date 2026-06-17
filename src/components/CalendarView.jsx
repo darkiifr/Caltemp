@@ -11,7 +11,7 @@ const MONTHS = [
     'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'
 ];
 
-export default function CalendarView({ events, onAddEvent, onEditEvent, onDeleteEvent, showHolidays = true, showNamedays = true }) {
+export default function CalendarView({ events, onAddEvent, onEditEvent, onDeleteEvent, onViewChange, showHolidays = true, showNamedays = true }) {
     const [currentDate, setCurrentDate] = useState(new Date());
     const [selectedDate, setSelectedDate] = useState(new Date());
     const [view, setView] = useState('month'); // 'year', 'month', 'week', 'day'
@@ -28,6 +28,10 @@ export default function CalendarView({ events, onAddEvent, onEditEvent, onDelete
         }, 60000);
         return () => clearInterval(interval);
     }, []);
+
+    useEffect(() => {
+        onViewChange?.(view);
+    }, [view, onViewChange]);
 
     // Scroll to current time on view change to 'day'
     useEffect(() => {

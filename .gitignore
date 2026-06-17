@@ -26,7 +26,18 @@ dist-ssr
 # Security
 .env
 .env.*
-! .env.example
+!.env.example
 *.key
 *.pem
 
+# Local agent / Codex workspace notes
+CODEX.md
+codex.md
+.codex/
+.playwright-mcp/
+
+# Generated local artifacts
+outputs/
+
+# Native build artifacts
+src-tauri/target/

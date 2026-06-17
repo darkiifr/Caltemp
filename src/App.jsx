@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Calendar as CalendarIcon, Settings, Bot, ListTodo } from 'lucide-react';
 import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -14,6 +14,8 @@ import ContextMenu from "./components/ContextMenu";
 import NotificationToast from "./components/NotificationToast";
 import "./App.css";
 import { loadEvents, saveEvents, loadSettings, saveSettings } from "./services/fileManager";
+import { ExtensionManager, ExtensionStore } from "./extensions";
+import { clearDiscordPresence, updateDiscordPresence } from "./services/discordRpc";
 
 import { playBubbleSound, playRingtone, playNotificationSound, configureSounds, resumeAudioContext } from "./utils/sound";
 import { getNextOccurrence } from "./utils/eventUtils";
@@ -30,14 +32,30 @@ function App() {
   const [contextMenu, setContextMenu] = useState({ visible: false, x: 0, y: 0 });
   const [isLoaded, setIsLoaded] = useState(false);
   const [toastNotification, setToastNotification] = useState(null);
+  const [installedExtensions, setInstalledExtensions] = useState([]);
+  const [extensionErrors, setExtensionErrors] = useState([]);
+  const [calendarView, setCalendarView] = useState('month');
+  const [startedAt] = useState(() => Date.now());
+  const eventsRef = useRef([]);
+  const settingsRef = useRef({});
+  const extensionManagerRef = useRef(null);
 
   const [settings, setSettings] = useState({
     theme: 'dark',
     notifications: true,
-    aiEnabled: true
+    aiEnabled: true,
+    discordRpcEnabled: false
   });
   const [previewSettings, setPreviewSettings] = useState(null);
   const currentSettings = previewSettings || settings;
+
+  useEffect(() => {
+    eventsRef.current = events;
+  }, [events]);
+
+  useEffect(() => {
+    settingsRef.current = settings;
+  }, [settings]);
 
   // Load Data
   useEffect(() => {
@@ -56,7 +74,8 @@ function App() {
           theme: 'dark',
           notifications: true,
           aiEnabled: true,
-          fontSize: 16
+          fontSize: 16,
+          discordRpcEnabled: false
         };
 
         if (os === 'macos') {
@@ -153,6 +172,75 @@ function App() {
     }
   }, [settings.notifications]);
 
+  const refreshExtensions = React.useCallback(async () => {
+    const store = new ExtensionStore();
+    const manager = new ExtensionManager({
+      store,
+      host: {
+        getEvents: () => eventsRef.current,
+        getSettings: () => settingsRef.current,
+        createEvent: async (event) => {
+          const eventToSave = {
+            id: event.id || globalThis.crypto?.randomUUID?.() || Date.now().toString(),
+            date: event.date || new Date().toISOString(),
+            title: event.title || 'Nouvel événement',
+            ...event,
+          };
+          const updatedEvents = [...eventsRef.current, eventToSave];
+          eventsRef.current = updatedEvents;
+          setEvents(updatedEvents);
+          await saveEvents(updatedEvents);
+          extensionManagerRef.current?.emit('calendar:event-created', { event: eventToSave });
+          return eventToSave;
+        },
+        updateEvent: async (event) => {
+          const updatedEvents = eventsRef.current.map((item) => item.id === event.id ? { ...item, ...event } : item);
+          eventsRef.current = updatedEvents;
+          setEvents(updatedEvents);
+          await saveEvents(updatedEvents);
+          extensionManagerRef.current?.emit('calendar:event-updated', { event });
+          return event;
+        },
+        deleteEvent: async (eventId) => {
+          const updatedEvents = eventsRef.current.filter((event) => event.id !== eventId);
+          eventsRef.current = updatedEvents;
+          setEvents(updatedEvents);
+          await saveEvents(updatedEvents);
+          extensionManagerRef.current?.emit('calendar:event-deleted', { eventId });
+        },
+        notify,
+      },
+    });
+
+    extensionManagerRef.current = manager;
+    await manager.initialize();
+    setInstalledExtensions(manager.getInstalled());
+    setExtensionErrors(manager.getErrors());
+    manager.emit('app:ready', { version: settingsRef.current?.version });
+  }, [notify]);
+
+  useEffect(() => {
+    if (!isLoaded) return;
+    refreshExtensions().catch((error) => {
+      console.error('Failed to initialize extensions:', error);
+      setExtensionErrors([{ message: error.message, error }]);
+    });
+  }, [isLoaded, refreshExtensions]);
+
+  useEffect(() => {
+    if (!isLoaded) return;
+
+    if (currentSettings.discordRpcEnabled) {
+      updateDiscordPresence({
+        section: isDexterOpen ? 'dexter' : (isSettingsOpen ? 'settings' : 'calendar'),
+        view: calendarView,
+        startedAt,
+      });
+    } else {
+      clearDiscordPresence();
+    }
+  }, [calendarView, currentSettings.discordRpcEnabled, isDexterOpen, isLoaded, isSettingsOpen, startedAt]);
+
   // Check for reminders dynamically to save battery when in background
   useEffect(() => {
     let timeoutId;
@@ -221,12 +309,17 @@ function App() {
   };
 
   const handleSaveEvent = async (newEvent) => {
+    const isEditing = Boolean(selectedEvent);
     const updatedEvents = selectedEvent
       ? events.map(e => e.id === newEvent.id ? newEvent : e)
       : [...events, newEvent];
 
     setEvents(updatedEvents);
     await saveEvents(updatedEvents);
+    extensionManagerRef.current?.emit(
+      isEditing ? 'calendar:event-updated' : 'calendar:event-created',
+      { event: newEvent }
+    );
 
     notify(
       'Événement enregistré',
@@ -246,6 +339,7 @@ function App() {
     const updatedEvents = events.filter(e => e.id !== eventId);
     setEvents(updatedEvents);
     await saveEvents(updatedEvents);
+    extensionManagerRef.current?.emit('calendar:event-deleted', { eventId });
   };
 
   const handleContextMenu = (e) => {
@@ -352,6 +446,7 @@ function App() {
                     setIsEventModalOpen(true);
                   }}
                   onDeleteEvent={handleDeleteEvent}
+                  onViewChange={setCalendarView}
                 />
               </div>
             )}
@@ -403,12 +498,16 @@ function App() {
             if (newSettings.soundConfig) {
               configureSounds(newSettings.soundConfig);
             }
+            extensionManagerRef.current?.emit('settings:changed', { settings: newSettings });
           } catch (e) {
             console.error("Failed to save settings:", e);
           }
 
           setIsSettingsOpen(false);
         }}
+        installedExtensions={installedExtensions}
+        extensionErrors={extensionErrors}
+        onRefreshExtensions={refreshExtensions}
       />
 
       <NotificationToast

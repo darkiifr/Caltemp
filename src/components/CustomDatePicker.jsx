@@ -1,6 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { playBubbleSound } from '../utils/sound';
+import {
+    DATE_PICKER_DAY_BUTTON_CLASS,
+    DATE_PICKER_NAV_BUTTON_CLASS,
+    DATE_PICKER_POPOVER_CLASS,
+    DATE_PICKER_POPOVER_STYLE,
+} from './datePickerStyles';
 
 const DAYS = ['Di', 'Lu', 'Ma', 'Me', 'Je', 'Ve', 'Sa'];
 const MONTHS = [
@@ -70,15 +76,15 @@ export default function CustomDatePicker({ value, onChange }) {
 
             {/* Dropdown Calendar */}
             {isOpen && (
-                <div className="absolute top-full left-0 mt-2 w-64 bg-[#1e1e1e] border border-white/10 rounded-2xl shadow-2xl p-4 z-50 animate-in zoom-in-95 duration-200">
+                <div className={DATE_PICKER_POPOVER_CLASS} style={DATE_PICKER_POPOVER_STYLE}>
                     <div className="flex justify-between items-center mb-4">
-                        <button onClick={handlePrevMonth} className="p-1 hover:bg-white/10 rounded-full text-white/70">
+                        <button type="button" onClick={handlePrevMonth} className={DATE_PICKER_NAV_BUTTON_CLASS}>
                             <ChevronLeft size={16} />
                         </button>
                         <span className="font-semibold text-white capitalize">
                             {MONTHS[month]} {year}
                         </span>
-                        <button onClick={handleNextMonth} className="p-1 hover:bg-white/10 rounded-full text-white/70">
+                        <button type="button" onClick={handleNextMonth} className={DATE_PICKER_NAV_BUTTON_CLASS}>
                             <ChevronRight size={16} />
                         </button>
                     </div>
@@ -97,11 +103,12 @@ export default function CustomDatePicker({ value, onChange }) {
                             const isSelected = value === `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
                             return (
                                 <button
+                                    type="button"
                                     key={d}
                                     onClick={() => handleSelectDay(d)}
                                     className={`
-                                        w-8 h-8 rounded-lg text-sm flex items-center justify-center transition-all
-                                        ${isSelected ? 'bg-blue-600 text-white font-bold' : 'text-white/80 hover:bg-white/10'}
+                                        ${DATE_PICKER_DAY_BUTTON_CLASS}
+                                        ${isSelected ? '!bg-blue-600 text-white font-bold' : 'text-white/80 hover:bg-white/10'}
                                     `}
                                 >
                                     {d}

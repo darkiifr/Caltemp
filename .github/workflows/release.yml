@@ -29,10 +29,10 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install Deno
-        uses: denoland/setup-deno@v2
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
         with:
-          deno-version: v2.x
+          node-version: 22
 
       - name: Configure Git
         run: |
@@ -40,18 +40,18 @@ jobs:
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Bump Version
-        run: deno run -A scripts/bump-version.mjs --type=${{ github.event.inputs.bump_type }}
+        run: node scripts/bump-version.mjs --type=${{ github.event.inputs.bump_type }}
 
       - name: Get New Version
         id: get_version
         run: |
-          NEW_VERSION=$(deno eval 'console.log(JSON.parse(Deno.readTextFileSync("./package.json")).version)')
+          NEW_VERSION=$(node -p "require('./package.json').version")
           echo "new_tag=v$NEW_VERSION" >> $GITHUB_OUTPUT
           echo "NEW_VERSION=$NEW_VERSION" >> $GITHUB_ENV
 
       - name: Commit and Push
         run: |
-          git add package.json src-tauri/tauri.conf.json public/version.json
+          git add package.json package-lock.json src-tauri/Cargo.toml src-tauri/tauri.conf.json public/version.json
           git commit -m "chore(release): $NEW_VERSION"
           git push origin main
           git tag v$NEW_VERSION
@@ -91,10 +91,11 @@ jobs:
         with:
           ref: ${{ needs.bump-version.outputs.new_tag || github.ref_name }}
 
-      - name: Install Deno
-        uses: denoland/setup-deno@v2
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
         with:
-          deno-version: v2.x
+          node-version: 22
+          cache: npm
 
       - name: Sync Version (if tag push)
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
@@ -108,21 +109,39 @@ jobs:
             VERSION=${VERSION#.}
             echo "Syncing version to $VERSION"
             # Update package.json
-            deno eval "
-              const pkg = JSON.parse(Deno.readTextFileSync('package.json'));
+            node -e "
+              const fs = require('fs');
+              const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
               pkg.version = '$VERSION';
-              Deno.writeTextFileSync('package.json', JSON.stringify(pkg, null, 2));
+              fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+            "
+            # Update package-lock.json if present
+            node -e "
+              const fs = require('fs');
+              if (!fs.existsSync('package-lock.json')) process.exit(0);
+              const lock = JSON.parse(fs.readFileSync('package-lock.json', 'utf8'));
+              lock.version = '$VERSION';
+              if (lock.packages && lock.packages['']) lock.packages[''].version = '$VERSION';
+              fs.writeFileSync('package-lock.json', JSON.stringify(lock, null, 2) + '\n');
             "
             # Update tauri.conf.json
-            deno eval "
-              const tauriConf = JSON.parse(Deno.readTextFileSync('src-tauri/tauri.conf.json'));
+            node -e "
+              const fs = require('fs');
+              const tauriConf = JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json', 'utf8'));
               tauriConf.version = '$VERSION';
-              Deno.writeTextFileSync('src-tauri/tauri.conf.json', JSON.stringify(tauriConf, null, 2));
+              fs.writeFileSync('src-tauri/tauri.conf.json', JSON.stringify(tauriConf, null, 2) + '\n');
+            "
+            # Update Cargo.toml
+            node -e "
+              const fs = require('fs');
+              const p = 'src-tauri/Cargo.toml';
+              fs.writeFileSync(p, fs.readFileSync(p, 'utf8').replace(/^version = \".*\"$/m, 'version = \"$VERSION\"'));
             "
             # Update public/version.json for runtime check
-            deno eval "
+            node -e "
+              const fs = require('fs');
               const versionData = { version: '$VERSION' };
-              Deno.writeTextFileSync('public/version.json', JSON.stringify(versionData, null, 2));
+              fs.writeFileSync('public/version.json', JSON.stringify(versionData, null, 2) + '\n');
             "
           else
             echo "Tag $TAG_NAME does not start with 'v', skipping version sync."
@@ -140,7 +159,7 @@ jobs:
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
       - name: Install frontend dependencies
-        run: deno install
+        run: npm ci
 
       - name: Build the app
         uses: tauri-apps/tauri-action@v0
@@ -172,7 +191,7 @@ jobs:
           node-version: 20
           
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       - name: Generate latest.json
         uses: actions/github-script@v7
