@@ -3,6 +3,28 @@ import react from "@vitejs/plugin-react";
 import path from "node:path";
 
 const host = process.env.TAURI_DEV_HOST;
+const uiVendorModules = [
+  "framer-motion",
+  "lucide-react",
+  "@radix-ui/react-dialog",
+  "@radix-ui/react-tooltip",
+];
+const tauriVendorModules = [
+  "@tauri-apps/api",
+  "@tauri-apps/plugin-os",
+  "@tauri-apps/plugin-notification",
+];
+
+function manualChunks(id) {
+  if (!id.includes("node_modules")) return undefined;
+  if (uiVendorModules.some((moduleName) => id.includes(`/node_modules/${moduleName}/`) || id.includes(`\\node_modules\\${moduleName}\\`))) {
+    return "vendor-ui";
+  }
+  if (tauriVendorModules.some((moduleName) => id.includes(`/node_modules/${moduleName}/`) || id.includes(`\\node_modules\\${moduleName}\\`))) {
+    return "vendor-tauri";
+  }
+  return undefined;
+}
 
 // https://vite.dev/config/
 export default defineConfig(async () => ({
@@ -18,10 +40,7 @@ export default defineConfig(async () => ({
     chunkSizeWarningLimit: 800,
     rollupOptions: {
       output: {
-        manualChunks: {
-          'vendor-ui': ['framer-motion', 'lucide-react', '@radix-ui/react-dialog', '@radix-ui/react-tooltip'],
-          'vendor-tauri': ['@tauri-apps/api', '@tauri-apps/plugin-os', '@tauri-apps/plugin-notification'],
-        }
+        manualChunks,
       }
     }
   },

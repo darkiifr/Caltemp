@@ -10,7 +10,9 @@
     {
       "identifier": "http:allow-fetch",
       "allow": [
-        { "url": "https://openrouter.ai/**" }
+        { "url": "https://openrouter.ai/**" },
+        { "url": "https://raw.githubusercontent.com/**" },
+        { "url": "https://github.com/**" }
       ]
     },
     "core:window:allow-minimize",

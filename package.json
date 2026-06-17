@@ -1,7 +1,7 @@
 {
   "name": "caltemp",
   "private": true,
-  "version": "0.1.0",
+  "version": "6.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,8 +9,9 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "lint": "eslint .",
-    "test": "vitest",
-    "test:run": "vitest run"
+    "test": "vitest run",
+    "test:run": "vitest run",
+    "extensions:validate": "node scripts/validate-extension.mjs"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.2.8",

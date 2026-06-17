@@ -1,0 +1,16 @@
+{
+  "id": "com.caltemp.examples.minimal-plugin",
+  "name": "Plugin minimal",
+  "type": "plugin",
+  "version": "1.0.0",
+  "sdkVersion": "1.0.0",
+  "compatibility": {
+    "caltemp": ">=6.0.0"
+  },
+  "description": "Exemple minimal qui écoute le démarrage de Caltemp.",
+  "author": "Caltemp",
+  "license": "MIT",
+  "repository": "https://github.com/darkiifr/Caltemp",
+  "entry": "index.js",
+  "permissions": []
+}

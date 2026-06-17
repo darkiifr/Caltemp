@@ -16,6 +16,8 @@ import CommandPalette from "./components/CommandPalette";
 import MiniCalendar from "./components/MiniCalendar";
 import "./App.css";
 import { loadEvents, saveEvents, loadSettings, saveSettings } from "./services/fileManager";
+import { ExtensionManager, ExtensionStore } from "./extensions";
+import { clearDiscordPresence, updateDiscordPresence } from "./services/discordRpc";
 
 import { playBubbleSound, playRingtone, playNotificationSound, configureSounds, resumeAudioContext } from "./utils/sound";
 import { normalizeEvent, normalizeEvents, normalizeSettings } from "./domain/events";
@@ -39,15 +41,31 @@ function App() {
   const [toastNotification, setToastNotification] = useState(null);
   const [silentBadgeCount, setSilentBadgeCount] = useState(0);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  const [installedExtensions, setInstalledExtensions] = useState([]);
+  const [extensionErrors, setExtensionErrors] = useState([]);
+  const [calendarView, setCalendarView] = useState('month');
+  const [startedAt] = useState(() => Date.now());
   const calendarExportRef = useRef(null);
+  const eventsRef = useRef([]);
+  const settingsRef = useRef({});
+  const extensionManagerRef = useRef(null);
 
   const [settings, setSettings] = useState({
     theme: 'dark',
     notifications: true,
-    aiEnabled: true
+    aiEnabled: true,
+    discordRpcEnabled: false
   });
   const [previewSettings, setPreviewSettings] = useState(null);
   const currentSettings = previewSettings || settings;
+
+  useEffect(() => {
+    eventsRef.current = events;
+  }, [events]);
+
+  useEffect(() => {
+    settingsRef.current = settings;
+  }, [settings]);
 
   // Load Data
   useEffect(() => {
@@ -69,6 +87,7 @@ function App() {
           theme: 'dark',
           notifications: true,
           aiEnabled: true,
+          discordRpcEnabled: false,
           fontSize: 16
         });
 
@@ -189,6 +208,83 @@ function App() {
     }
   }, [settings.notifications, settings.notificationMode]);
 
+  const refreshExtensions = useCallback(async () => {
+    if (isMiniWindow) return;
+
+    const store = new ExtensionStore();
+    const manager = new ExtensionManager({
+      store,
+      host: {
+        getEvents: () => eventsRef.current,
+        getSettings: () => settingsRef.current,
+        createEvent: async (event) => {
+          const eventToSave = normalizeEvent({
+            id: event.id || Date.now().toString(),
+            date: event.date || new Date().toISOString(),
+            title: event.title || 'Sans titre',
+            ...event,
+          }, settingsRef.current);
+          const updatedEvents = [...eventsRef.current, eventToSave];
+          setEvents(updatedEvents);
+          await saveEvents(updatedEvents);
+          manager.emit('calendar:event-created', { event: eventToSave });
+          return eventToSave;
+        },
+        updateEvent: async (event) => {
+          const eventToSave = normalizeEvent(event, settingsRef.current);
+          const updatedEvents = eventsRef.current.map((item) =>
+            item.id === eventToSave.id ? eventToSave : item
+          );
+          setEvents(updatedEvents);
+          await saveEvents(updatedEvents);
+          manager.emit('calendar:event-updated', { event: eventToSave });
+          return eventToSave;
+        },
+        deleteEvent: async (eventId) => {
+          const updatedEvents = eventsRef.current.filter((item) => item.id !== eventId);
+          setEvents(updatedEvents);
+          await saveEvents(updatedEvents);
+          manager.emit('calendar:event-deleted', { eventId });
+        },
+        notify,
+      },
+    });
+
+    extensionManagerRef.current = manager;
+    await manager.initialize();
+    setInstalledExtensions(manager.getInstalled());
+    setExtensionErrors(manager.getErrors());
+    manager.emit('app:ready', { version: settingsRef.current?.version });
+  }, [isMiniWindow, notify]);
+
+  useEffect(() => {
+    if (!isLoaded || isMiniWindow) return;
+    refreshExtensions().catch((error) => {
+      console.error('Failed to initialize extensions:', error);
+      setExtensionErrors([{ extensionId: 'runtime', message: error.message }]);
+    });
+  }, [isLoaded, isMiniWindow, refreshExtensions]);
+
+  useEffect(() => {
+    if (!isLoaded || isMiniWindow) return;
+
+    if (!currentSettings.discordRpcEnabled) {
+      clearDiscordPresence();
+      return;
+    }
+
+    const section = isSettingsOpen ? 'settings' : isDexterOpen ? 'dexter' : 'calendar';
+    updateDiscordPresence({ section, view: calendarView, startedAt });
+  }, [
+    calendarView,
+    currentSettings.discordRpcEnabled,
+    isDexterOpen,
+    isLoaded,
+    isMiniWindow,
+    isSettingsOpen,
+    startedAt,
+  ]);
+
   // Check for reminders dynamically to save battery when in background
   useEffect(() => {
     if (isMiniWindow) return;
@@ -236,6 +332,10 @@ function App() {
 
     setEvents(updatedEvents);
     await saveEvents(updatedEvents);
+    extensionManagerRef.current?.emit(
+      selectedEvent ? 'calendar:event-updated' : 'calendar:event-created',
+      { event: normalizedEvent }
+    );
 
     notify(
       'Événement enregistré',
@@ -262,6 +362,7 @@ function App() {
     const updatedEvents = events.filter(e => e.id !== eventId);
     setEvents(updatedEvents);
     await saveEvents(updatedEvents);
+    extensionManagerRef.current?.emit('calendar:event-deleted', { eventId });
   };
 
   const handleContextMenu = (e) => {
@@ -450,6 +551,7 @@ function App() {
                   showHolidays={currentSettings.showHolidays !== false}
                   showNamedays={currentSettings.showNamedays !== false}
                   onAddEvent={handleAddEvent}
+                  onViewChange={setCalendarView}
                   onEditEvent={(event) => {
                     setSelectedEvent(event);
                     setIsEventModalOpen(true);
@@ -484,6 +586,9 @@ function App() {
         events={events}
         osType={osType}
         onImportEvents={handleImportEvents}
+        installedExtensions={installedExtensions}
+        extensionErrors={extensionErrors}
+        onRefreshExtensions={refreshExtensions}
         onClose={() => {
           setPreviewSettings(null);
           // Revert window effect if needed
@@ -508,6 +613,7 @@ function App() {
             if (normalizedSettings.soundConfig) {
               configureSounds(normalizedSettings.soundConfig);
             }
+            extensionManagerRef.current?.emit('settings:changed', { settings: normalizedSettings });
           } catch (e) {
             console.error("Failed to save settings:", e);
             throw e;

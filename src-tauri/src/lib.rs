@@ -2,6 +2,9 @@ use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, TrayIconBuilder, TrayIconEvent};
 use tauri::webview::Color;
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use std::sync::Mutex;
+use discord_rich_presence::{activity, DiscordIpc, DiscordIpcClient};
+use serde::Deserialize;
 
 #[cfg(target_os = "windows")]
 use window_vibrancy::{
@@ -9,6 +12,28 @@ use window_vibrancy::{
 };
 #[cfg(target_os = "macos")]
 use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial};
+
+#[derive(Default)]
+struct DiscordRpcState {
+    client: Mutex<Option<DiscordIpcClient>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DiscordPresence {
+    client_id: String,
+    activity: DiscordActivityPayload,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DiscordActivityPayload {
+    details: String,
+    state: String,
+    start_timestamp: Option<i64>,
+    large_image_key: Option<String>,
+    large_image_text: Option<String>,
+}
 
 #[tauri::command]
 fn set_window_effect(window: tauri::WebviewWindow, effect: &str) {
@@ -50,6 +75,62 @@ fn set_window_effect(window: tauri::WebviewWindow, effect: &str) {
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
+}
+
+#[tauri::command]
+fn discord_rpc_update(
+    state: tauri::State<'_, DiscordRpcState>,
+    presence: DiscordPresence,
+) -> Result<(), String> {
+    let mut guard = state
+        .client
+        .lock()
+        .map_err(|_| "Discord RPC state is unavailable.".to_string())?;
+
+    if guard.is_none() {
+        let mut client = DiscordIpcClient::new(&presence.client_id);
+        client.connect().map_err(|error| error.to_string())?;
+        *guard = Some(client);
+    }
+
+    let mut payload = activity::Activity::new()
+        .details(presence.activity.details)
+        .state(presence.activity.state);
+
+    if let Some(start) = presence.activity.start_timestamp {
+        payload = payload.timestamps(activity::Timestamps::new().start(start));
+    }
+
+    if presence.activity.large_image_key.is_some() || presence.activity.large_image_text.is_some() {
+        let mut assets = activity::Assets::new();
+        if let Some(key) = presence.activity.large_image_key {
+            assets = assets.large_image(key);
+        }
+        if let Some(text) = presence.activity.large_image_text {
+            assets = assets.large_text(text);
+        }
+        payload = payload.assets(assets);
+    }
+
+    if let Some(client) = guard.as_mut() {
+        client.set_activity(payload).map_err(|error| error.to_string())?;
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+fn discord_rpc_clear(state: tauri::State<'_, DiscordRpcState>) -> Result<(), String> {
+    let mut guard = state
+        .client
+        .lock()
+        .map_err(|_| "Discord RPC state is unavailable.".to_string())?;
+
+    if let Some(mut client) = guard.take() {
+        let _ = client.close();
+    }
+
+    Ok(())
 }
 
 const PORTABLE_FILES: [&str; 2] = ["events.json", "settings.json"];
@@ -147,6 +228,7 @@ fn set_mini_calendar_always_on_top(app: tauri::AppHandle, enabled: bool) -> Resu
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(DiscordRpcState::default())
         .plugin(tauri_plugin_autostart::Builder::new().build())
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             let _ = app
@@ -220,6 +302,8 @@ pub fn run() {
             read_portable_data_file,
             write_portable_data_file,
             set_window_effect,
+            discord_rpc_update,
+            discord_rpc_clear,
             toggle_mini_calendar,
             set_mini_calendar_always_on_top
         ])

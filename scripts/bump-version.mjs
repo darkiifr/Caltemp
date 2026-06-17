@@ -3,6 +3,7 @@ import path from 'path';
 
 const packageJsonPath = path.resolve('package.json');
 const tauriConfPath = path.resolve('src-tauri/tauri.conf.json');
+const cargoTomlPath = path.resolve('src-tauri/Cargo.toml');
 
 // Read package.json
 const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));
@@ -38,6 +39,13 @@ fs.writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, 2) + '\n');
 const tauriConf = JSON.parse(fs.readFileSync(tauriConfPath, 'utf-8'));
 tauriConf.version = newVersion;
 fs.writeFileSync(tauriConfPath, JSON.stringify(tauriConf, null, 2) + '\n');
+
+// Update Cargo.toml
+const cargoToml = fs.readFileSync(cargoTomlPath, 'utf-8');
+fs.writeFileSync(
+    cargoTomlPath,
+    cargoToml.replace(/^version = ".*"$/m, `version = "${newVersion}"`)
+);
 
 // Update public/version.json
 const versionJsonPath = path.resolve('public/version.json');

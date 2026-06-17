@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://caltemp.app/schemas/caltemp-extension-manifest.schema.json",
+  "title": "Caltemp Extension Manifest",
+  "type": "object",
+  "required": ["id", "name", "type", "version", "sdkVersion", "compatibility"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9.-]+[a-z0-9]$"
+    },
+    "name": { "type": "string", "minLength": 1 },
+    "type": { "enum": ["plugin", "theme"] },
+    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+" },
+    "sdkVersion": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+" },
+    "compatibility": {
+      "type": "object",
+      "required": ["caltemp"],
+      "properties": {
+        "caltemp": { "type": "string" }
+      }
+    },
+    "description": { "type": "string" },
+    "author": { "type": "string" },
+    "license": { "type": "string" },
+    "homepage": { "type": "string" },
+    "repository": { "type": "string" },
+    "changelog": { "type": "string" },
+    "permissions": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "calendar:read",
+          "calendar:write",
+          "settings:read",
+          "notifications:send",
+          "network:github",
+          "storage:extension"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "entry": { "type": "string" },
+    "theme": {
+      "type": "object",
+      "properties": {
+        "variables": {
+          "type": "object",
+          "propertyNames": { "pattern": "^--" },
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    },
+    "dependencies": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "type": { "const": "plugin" } } },
+      "then": { "required": ["entry"] }
+    },
+    {
+      "if": { "properties": { "type": { "const": "theme" } } },
+      "then": { "required": ["theme"] }
+    }
+  ]
+}

@@ -16,7 +16,7 @@ const MONTHS = [
 const AGENDA_WINDOW_DAYS = 45;
 const FOCUS_WINDOW_DAYS = 14;
 
-export default function CalendarView({ events, settings = {}, onAddEvent, onEditEvent, onDeleteEvent, showHolidays = true, showNamedays = true }) {
+export default function CalendarView({ events, settings = {}, onAddEvent, onEditEvent, onDeleteEvent, onViewChange, showHolidays = true, showNamedays = true }) {
     const [currentDate, setCurrentDate] = useState(new Date());
     const [selectedDate, setSelectedDate] = useState(new Date());
     const [view, setView] = useState('month'); // 'year', 'month', 'week', 'day', 'agenda', 'focus', 'stats'
@@ -33,6 +33,10 @@ export default function CalendarView({ events, settings = {}, onAddEvent, onEdit
         }, 60000);
         return () => clearInterval(interval);
     }, []);
+
+    useEffect(() => {
+        onViewChange?.(view);
+    }, [onViewChange, view]);
 
     // Scroll to current time on view change to 'day'
     useEffect(() => {
