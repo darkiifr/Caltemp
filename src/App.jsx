@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useCallback, useState, useEffect, useMemo, useRef } from "react";
 import { Calendar as CalendarIcon, Settings, Bot, ListTodo } from 'lucide-react';
 import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -12,15 +12,22 @@ import Dexter from "./components/Dexter";
 import Titlebar from "./components/Titlebar";
 import ContextMenu from "./components/ContextMenu";
 import NotificationToast from "./components/NotificationToast";
+import CommandPalette from "./components/CommandPalette";
+import MiniCalendar from "./components/MiniCalendar";
 import "./App.css";
 import { loadEvents, saveEvents, loadSettings, saveSettings } from "./services/fileManager";
 import { ExtensionManager, ExtensionStore } from "./extensions";
 import { clearDiscordPresence, updateDiscordPresence } from "./services/discordRpc";
 
 import { playBubbleSound, playRingtone, playNotificationSound, configureSounds, resumeAudioContext } from "./utils/sound";
-import { getNextOccurrence } from "./utils/eventUtils";
+import { normalizeEvent, normalizeEvents, normalizeSettings } from "./domain/events";
+import { applyNotificationMarks, buildReminderNotifications, snoozeEventOccurrence } from "./domain/reminders";
+import { exportElementAsPdf, exportElementAsPng } from "./utils/exportView";
+import { FastAverageColor } from "fast-average-color";
 
 function App() {
+  const isMiniWindow = new URLSearchParams(window.location.search).get('mini') === '1'
+    || window.location.hash.includes('mini');
   const [events, setEvents] = useState([]);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isDexterOpen, setIsDexterOpen] = useState(false);
@@ -32,10 +39,13 @@ function App() {
   const [contextMenu, setContextMenu] = useState({ visible: false, x: 0, y: 0 });
   const [isLoaded, setIsLoaded] = useState(false);
   const [toastNotification, setToastNotification] = useState(null);
+  const [silentBadgeCount, setSilentBadgeCount] = useState(0);
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [installedExtensions, setInstalledExtensions] = useState([]);
   const [extensionErrors, setExtensionErrors] = useState([]);
   const [calendarView, setCalendarView] = useState('month');
   const [startedAt] = useState(() => Date.now());
+  const calendarExportRef = useRef(null);
   const eventsRef = useRef([]);
   const settingsRef = useRef({});
   const extensionManagerRef = useRef(null);
@@ -61,22 +71,25 @@ function App() {
   useEffect(() => {
     async function initData() {
       try {
-        const os = await type();
+        const isTauriRuntime = Boolean(window.__TAURI_INTERNALS__);
+        const os = !isMiniWindow && isTauriRuntime ? await type() : '';
         setOsType(os);
 
-        const [loadedEvents, loadedSettings] = await Promise.all([
-          loadEvents(),
-          loadSettings()
-        ]);
+        const [loadedEvents, loadedSettings] = isTauriRuntime
+          ? await Promise.all([
+              loadEvents(),
+              loadSettings()
+            ])
+          : [[], {}];
 
         // Determine defaults based on OS
-        let defaultSettings = {
+        let defaultSettings = normalizeSettings({
           theme: 'dark',
           notifications: true,
           aiEnabled: true,
-          fontSize: 16,
-          discordRpcEnabled: false
-        };
+          discordRpcEnabled: false,
+          fontSize: 16
+        });
 
         if (os === 'macos') {
           defaultSettings.titlebarStyle = 'macos';
@@ -93,43 +106,47 @@ function App() {
         // If loadedSettings is empty (first run), defaults will be used.
         // If loadedSettings has some keys, they override defaults.
         // We merge defaults first, then loadedSettings.
-        const finalSettings = { ...defaultSettings, ...loadedSettings };
+        const finalSettings = normalizeSettings({ ...defaultSettings, ...loadedSettings });
 
         // Configure sounds
-        if (finalSettings.soundConfig) {
+        if (!isMiniWindow && finalSettings.soundConfig) {
           configureSounds(finalSettings.soundConfig);
         }
 
-        setEvents(loadedEvents || []);
+        setEvents(normalizeEvents(loadedEvents || [], finalSettings));
         setSettings(finalSettings);
         setIsLoaded(true);
 
         // Apply window effect on startup
-        if (finalSettings.windowEffect) {
+        if (!isMiniWindow && finalSettings.windowEffect) {
           invoke('set_window_effect', { effect: finalSettings.windowEffect });
         }
 
         // Attempt to resume audio context on first user interaction
-        const resumeAudio = () => {
-          resumeAudioContext();
-          window.removeEventListener('click', resumeAudio);
-          window.removeEventListener('keydown', resumeAudio);
-        };
-        window.addEventListener('click', resumeAudio);
-        window.addEventListener('keydown', resumeAudio);
+        if (!isMiniWindow) {
+          const resumeAudio = () => {
+            resumeAudioContext();
+            window.removeEventListener('click', resumeAudio);
+            window.removeEventListener('keydown', resumeAudio);
+          };
+          window.addEventListener('click', resumeAudio);
+          window.addEventListener('keydown', resumeAudio);
+        }
 
         // Request notification permission
-        let permissionGranted = await isPermissionGranted();
-        if (!permissionGranted) {
-          const permission = await requestPermission();
-          permissionGranted = permission === 'granted';
+        if (!isMiniWindow) {
+          let permissionGranted = await isPermissionGranted();
+          if (!permissionGranted) {
+            const permission = await requestPermission();
+            permissionGranted = permission === 'granted';
+          }
         }
       } catch (error) {
         console.error("Init error:", error);
       }
     }
     initData();
-  }, []);
+  }, [isMiniWindow]);
 
   // Apply font size to root for rem scaling
   useEffect(() => {
@@ -138,9 +155,28 @@ function App() {
     document.documentElement.style.fontSize = `${size}px`;
   }, [currentSettings.fontSize]);
 
+  useEffect(() => {
+    if (isMiniWindow) return;
+    if (!currentSettings.appBackground || currentSettings.autoAccentFromBackground === false) return;
+    const fac = new FastAverageColor();
+    fac.getColorAsync(currentSettings.appBackground, { crossOrigin: 'anonymous' })
+      .then(color => {
+        document.documentElement.style.setProperty('--caltemp-accent', color.hex);
+      })
+      .catch(() => {
+        document.documentElement.style.setProperty('--caltemp-accent', '#3b82f6');
+      });
+    return () => fac.destroy();
+  }, [currentSettings.appBackground, currentSettings.autoAccentFromBackground, isMiniWindow]);
+
   // Helper for notifications
-  const notify = React.useCallback(async (title, body, type = 'info') => {
+  const notify = React.useCallback(async (title, body, type = 'info', meta = {}) => {
     if (!settings.notifications) return;
+
+    if (settings.notificationMode === 'silent' && type === 'reminder') {
+      setSilentBadgeCount(count => count + (meta.count || 1));
+      return;
+    }
 
     if (type === 'reminder') {
       await playRingtone();
@@ -149,7 +185,7 @@ function App() {
     }
 
     // Always show internal toast
-    setToastNotification({ title, body, type });
+    setToastNotification({ id: Date.now().toString(), title, body, type, ...meta });
 
     try {
         sendNotification({ title, body });
@@ -170,9 +206,11 @@ function App() {
           // However, user was emphatic about 'le logiciel'. Let's trust the sound + unminimize focus)
        }
     }
-  }, [settings.notifications]);
+  }, [settings.notifications, settings.notificationMode]);
 
-  const refreshExtensions = React.useCallback(async () => {
+  const refreshExtensions = useCallback(async () => {
+    if (isMiniWindow) return;
+
     const store = new ExtensionStore();
     const manager = new ExtensionManager({
       store,
@@ -180,33 +218,33 @@ function App() {
         getEvents: () => eventsRef.current,
         getSettings: () => settingsRef.current,
         createEvent: async (event) => {
-          const eventToSave = {
-            id: event.id || globalThis.crypto?.randomUUID?.() || Date.now().toString(),
+          const eventToSave = normalizeEvent({
+            id: event.id || Date.now().toString(),
             date: event.date || new Date().toISOString(),
-            title: event.title || 'Nouvel événement',
+            title: event.title || 'Sans titre',
             ...event,
-          };
+          }, settingsRef.current);
           const updatedEvents = [...eventsRef.current, eventToSave];
-          eventsRef.current = updatedEvents;
           setEvents(updatedEvents);
           await saveEvents(updatedEvents);
-          extensionManagerRef.current?.emit('calendar:event-created', { event: eventToSave });
+          manager.emit('calendar:event-created', { event: eventToSave });
           return eventToSave;
         },
         updateEvent: async (event) => {
-          const updatedEvents = eventsRef.current.map((item) => item.id === event.id ? { ...item, ...event } : item);
-          eventsRef.current = updatedEvents;
+          const eventToSave = normalizeEvent(event, settingsRef.current);
+          const updatedEvents = eventsRef.current.map((item) =>
+            item.id === eventToSave.id ? eventToSave : item
+          );
           setEvents(updatedEvents);
           await saveEvents(updatedEvents);
-          extensionManagerRef.current?.emit('calendar:event-updated', { event });
-          return event;
+          manager.emit('calendar:event-updated', { event: eventToSave });
+          return eventToSave;
         },
         deleteEvent: async (eventId) => {
-          const updatedEvents = eventsRef.current.filter((event) => event.id !== eventId);
-          eventsRef.current = updatedEvents;
+          const updatedEvents = eventsRef.current.filter((item) => item.id !== eventId);
           setEvents(updatedEvents);
           await saveEvents(updatedEvents);
-          extensionManagerRef.current?.emit('calendar:event-deleted', { eventId });
+          manager.emit('calendar:event-deleted', { eventId });
         },
         notify,
       },
@@ -217,78 +255,56 @@ function App() {
     setInstalledExtensions(manager.getInstalled());
     setExtensionErrors(manager.getErrors());
     manager.emit('app:ready', { version: settingsRef.current?.version });
-  }, [notify]);
+  }, [isMiniWindow, notify]);
 
   useEffect(() => {
-    if (!isLoaded) return;
+    if (!isLoaded || isMiniWindow) return;
     refreshExtensions().catch((error) => {
       console.error('Failed to initialize extensions:', error);
-      setExtensionErrors([{ message: error.message, error }]);
+      setExtensionErrors([{ extensionId: 'runtime', message: error.message }]);
     });
-  }, [isLoaded, refreshExtensions]);
+  }, [isLoaded, isMiniWindow, refreshExtensions]);
 
   useEffect(() => {
-    if (!isLoaded) return;
+    if (!isLoaded || isMiniWindow) return;
 
-    if (currentSettings.discordRpcEnabled) {
-      updateDiscordPresence({
-        section: isDexterOpen ? 'dexter' : (isSettingsOpen ? 'settings' : 'calendar'),
-        view: calendarView,
-        startedAt,
-      });
-    } else {
+    if (!currentSettings.discordRpcEnabled) {
       clearDiscordPresence();
+      return;
     }
-  }, [calendarView, currentSettings.discordRpcEnabled, isDexterOpen, isLoaded, isSettingsOpen, startedAt]);
+
+    const section = isSettingsOpen ? 'settings' : isDexterOpen ? 'dexter' : 'calendar';
+    updateDiscordPresence({ section, view: calendarView, startedAt });
+  }, [
+    calendarView,
+    currentSettings.discordRpcEnabled,
+    isDexterOpen,
+    isLoaded,
+    isMiniWindow,
+    isSettingsOpen,
+    startedAt,
+  ]);
 
   // Check for reminders dynamically to save battery when in background
   useEffect(() => {
+    if (isMiniWindow) return;
     let timeoutId;
     
     const checkReminders = () => {
       const now = new Date();
-      const updatedEvents = events.map(event => {
-        if (event.reminder) {
-          // Allow catching occurrences that happened up to 5 minutes ago
-          const checkFromDate = new Date(now.getTime() - 5 * 60 * 1000);
-          const occ = getNextOccurrence(event, checkFromDate);
-          
-          if (!occ) return event;
+      const notifications = buildReminderNotifications(events, now);
 
-          const timeDiff = occ - now;
-          const occKey = occ.getTime().toString();
-          
-          const isFinalNotified = event.notifiedOccurrences && event.notifiedOccurrences[occKey] === 'final';
-          const isEarlyNotified = event.notifiedOccurrences && event.notifiedOccurrences[occKey] === 'early';
+      for (const notification of notifications) {
+        notify(notification.title, notification.body, notification.type, {
+          reminderItems: notification.items,
+          count: notification.items?.length || 1,
+        });
+      }
 
-          // If fully notified for this occurrence, do nothing
-          if (isFinalNotified) return event;
-
-          // Phase 2: Final / At Time (within 5 mins late)
-          if (timeDiff <= 0 && timeDiff > -5 * 60 * 1000) {
-             notify('Rappel Caltemp', `Maintenant : ${event.title}`, 'reminder');
-             return { 
-                 ...event, 
-                 notifiedOccurrences: { ...(event.notifiedOccurrences || {}), [occKey]: 'final' } 
-             };
-          }
-
-          // Phase 1: Early (within 15 mins)
-          if (!isEarlyNotified && !isFinalNotified && timeDiff > 0 && timeDiff <= 15 * 60 * 1000) {
-             notify('Rappel Caltemp', `Bientôt : ${event.title}`, 'reminder');
-             return { 
-                 ...event, 
-                 notifiedOccurrences: { ...(event.notifiedOccurrences || {}), [occKey]: 'early' } 
-             };
-          }
-        }
-        return event;
-      });
-
-      // Only update state if changes occurred to avoid infinite loops
-      if (isLoaded && JSON.stringify(updatedEvents) !== JSON.stringify(events)) {
-        setEvents(updatedEvents);
-        saveEvents(updatedEvents); // Persist notification state
+      const marked = applyNotificationMarks(events, notifications);
+      if (isLoaded && marked.changed) {
+        setEvents(marked.events);
+        saveEvents(marked.events);
       }
 
       // Schedule next run: 5 seconds if visible, 60 seconds if in background
@@ -300,39 +316,46 @@ function App() {
     timeoutId = setTimeout(checkReminders, 5000);
 
     return () => clearTimeout(timeoutId);
-  }, [events, isLoaded, settings, notify]);
+  }, [events, isLoaded, settings, notify, isMiniWindow]);
 
-  const handleAddEvent = (date) => {
+  const handleAddEvent = useCallback((date) => {
     setSelectedDate(date);
     setSelectedEvent(null);
     setIsEventModalOpen(true);
-  };
+  }, []);
 
-  const handleSaveEvent = async (newEvent) => {
-    const isEditing = Boolean(selectedEvent);
+  const handleSaveEvent = useCallback(async (newEvent) => {
+    const normalizedEvent = normalizeEvent(newEvent, settings);
     const updatedEvents = selectedEvent
-      ? events.map(e => e.id === newEvent.id ? newEvent : e)
-      : [...events, newEvent];
+      ? events.map(e => e.id === normalizedEvent.id ? normalizedEvent : e)
+      : [...events, normalizedEvent];
 
     setEvents(updatedEvents);
     await saveEvents(updatedEvents);
     extensionManagerRef.current?.emit(
-      isEditing ? 'calendar:event-updated' : 'calendar:event-created',
-      { event: newEvent }
+      selectedEvent ? 'calendar:event-updated' : 'calendar:event-created',
+      { event: normalizedEvent }
     );
 
     notify(
       'Événement enregistré',
-      `${newEvent.title} le ${new Date(newEvent.date).toLocaleDateString()}`,
+      `${normalizedEvent.title} le ${new Date(normalizedEvent.date).toLocaleDateString()}`,
       'success'
     );
-  };
+  }, [events, notify, selectedEvent, settings]);
 
   const handleImportEvents = async (importedEvents) => {
-    const newEvents = [...events, ...importedEvents];
+    const knownKeys = new Set(events.map(event => event.externalId || `${event.title}:${event.date}`));
+    const normalizedImports = normalizeEvents(importedEvents, settings).filter(event => {
+      const key = event.externalId || `${event.title}:${event.date}`;
+      if (knownKeys.has(key)) return false;
+      knownKeys.add(key);
+      return true;
+    });
+    const newEvents = [...events, ...normalizedImports];
     setEvents(newEvents);
     await saveEvents(newEvents);
-    notify('Importation', `${importedEvents.length} événements importés`, 'success');
+    notify('Importation', `${normalizedImports.length} événements importés`, 'success');
   };
 
   const handleDeleteEvent = async (eventId) => {
@@ -352,6 +375,86 @@ function App() {
   };
 
   const isBackgroundActive = currentSettings.backgroundEnabled !== false && currentSettings.appBackground;
+
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase('fr-FR') === 'k') {
+        event.preventDefault();
+        setIsCommandPaletteOpen(true);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  const handleToastSnooze = async (minutesOrMode) => {
+    if (!toastNotification?.reminderItems?.length) return;
+    const now = new Date();
+    const updatedEvents = events.map(event => {
+      const item = toastNotification.reminderItems.find(reminder => reminder.event.id === event.id);
+      return item ? snoozeEventOccurrence(event, item.occurrenceKey, minutesOrMode, now) : event;
+    });
+    setEvents(updatedEvents);
+    await saveEvents(updatedEvents);
+    setToastNotification(null);
+  };
+
+  const commandActions = useMemo(() => [
+    {
+      id: 'new-event',
+      label: 'Créer un événement',
+      run: () => handleAddEvent(new Date()),
+    },
+    {
+      id: 'import-ics',
+      label: 'Importer un fichier ICS',
+      run: () => setIsSettingsOpen(true),
+    },
+    {
+      id: 'toggle-silent',
+      label: settings.notificationMode === 'silent' ? 'Désactiver le mode silencieux' : 'Activer le mode silencieux',
+      run: async () => {
+        const next = normalizeSettings({
+          ...settings,
+          notificationMode: settings.notificationMode === 'silent' ? 'normal' : 'silent',
+        });
+        setSettings(next);
+        await saveSettings(next);
+      },
+    },
+    {
+      id: 'mini-calendar',
+      label: 'Ouvrir le mini-calendrier',
+      run: () => invoke('toggle_mini_calendar').catch(console.error),
+    },
+    {
+      id: 'export-png',
+      label: 'Exporter la vue en image PNG',
+      run: () => exportElementAsPng(calendarExportRef.current, 'caltemp.png').catch(console.error),
+    },
+    {
+      id: 'export-pdf',
+      label: 'Exporter la vue en PDF',
+      run: () => exportElementAsPdf(calendarExportRef.current, 'caltemp.pdf').catch(console.error),
+    },
+    ...((settings.routines || []).map(routine => ({
+      id: `routine-${routine.id}`,
+      label: `Appliquer la routine : ${routine.title}`,
+      run: () => {
+        const date = new Date();
+        date.setHours(9, 0, 0, 0);
+        handleSaveEvent({
+          title: routine.title,
+          date: date.toISOString(),
+          category: routine.category || 'perso',
+          durationMinutes: routine.durationMinutes || 60,
+          reminder: true,
+          recurrence: routine.recurrence || 'none',
+          routineId: routine.id,
+        });
+      },
+    }))),
+  ], [settings, handleAddEvent, handleSaveEvent]);
   
   const appBgStyle = isBackgroundActive ? {
     backgroundImage: `url(${currentSettings.appBackground})`,
@@ -363,6 +466,10 @@ function App() {
   // If we have a window effect (vibrancy/mica), we MUST be transparent.
   // Otherwise, if background is disabled, we show solid dark.
   const isTransparent = (currentSettings.windowEffect && currentSettings.windowEffect !== 'none') || isBackgroundActive;
+
+  if (isMiniWindow) {
+    return <MiniCalendar events={events} settings={currentSettings} />;
+  }
 
   return (
     <div
@@ -383,14 +490,15 @@ function App() {
       )}
       
       <div className="relative z-10 flex flex-col h-full w-full">
-        <Titlebar style={currentSettings.titlebarStyle || 'macos'} osType={osType} />
+        <Titlebar style={currentSettings.titlebarStyle || 'macos'} osType={osType} notificationBadge={silentBadgeCount} />
 
         <div className="flex-1 flex overflow-hidden">
         {/* Minimal Sidebar */}
         <div className="w-16 bg-[#1e1e1e]/50 backdrop-blur-md border-r border-white/5 flex flex-col items-center py-6 gap-6 z-20">
           <button
             onClick={() => playBubbleSound()}
-            className="p-3 rounded-xl bg-blue-500/20 text-blue-400 hover:bg-blue-500 hover:text-white transition-all shadow-lg shadow-blue-500/10"
+            className="p-3 rounded-xl text-blue-200 hover:text-white transition-all shadow-lg"
+            style={{ backgroundColor: 'color-mix(in srgb, var(--caltemp-accent, #3b82f6) 22%, transparent)' }}
           >
             <CalendarIcon size={24} />
           </button>
@@ -432,21 +540,23 @@ function App() {
                 isOpen={isDexterOpen}
                 onClose={() => setIsDexterOpen(false)}
                 settings={currentSettings}
+                events={events}
                 onAddEvent={handleSaveEvent}
               />
             ) : (
-              <div className="flex-1 flex flex-col overflow-hidden relative transition-all duration-300">
+              <div ref={calendarExportRef} className="flex-1 flex flex-col overflow-hidden relative transition-all duration-300">
                 <CalendarView
                   events={events}
+                  settings={currentSettings}
                   showHolidays={currentSettings.showHolidays !== false}
                   showNamedays={currentSettings.showNamedays !== false}
                   onAddEvent={handleAddEvent}
+                  onViewChange={setCalendarView}
                   onEditEvent={(event) => {
                     setSelectedEvent(event);
                     setIsEventModalOpen(true);
                   }}
                   onDeleteEvent={handleDeleteEvent}
-                  onViewChange={setCalendarView}
                 />
               </div>
             )}
@@ -468,6 +578,7 @@ function App() {
         onDelete={handleDeleteEvent}
         initialDate={selectedDate}
         initialEvent={selectedEvent}
+        settings={currentSettings}
       />
 
       <SettingsModal
@@ -475,6 +586,9 @@ function App() {
         events={events}
         osType={osType}
         onImportEvents={handleImportEvents}
+        installedExtensions={installedExtensions}
+        extensionErrors={extensionErrors}
+        onRefreshExtensions={refreshExtensions}
         onClose={() => {
           setPreviewSettings(null);
           // Revert window effect if needed
@@ -486,33 +600,39 @@ function App() {
         settings={settings}
         onPreview={setPreviewSettings}
         onSave={async (newSettings) => {
-          setSettings(newSettings);
+          const normalizedSettings = normalizeSettings(newSettings);
+          setSettings(normalizedSettings);
           setPreviewSettings(null);
           
           try {
-            await saveSettings(newSettings);
+            await saveSettings(normalizedSettings);
             // Re-apply window effect to ensure persistence
-            if (newSettings.windowEffect) {
-              await invoke('set_window_effect', { effect: newSettings.windowEffect });
+            if (normalizedSettings.windowEffect) {
+              await invoke('set_window_effect', { effect: normalizedSettings.windowEffect });
             }
-            if (newSettings.soundConfig) {
-              configureSounds(newSettings.soundConfig);
+            if (normalizedSettings.soundConfig) {
+              configureSounds(normalizedSettings.soundConfig);
             }
-            extensionManagerRef.current?.emit('settings:changed', { settings: newSettings });
+            extensionManagerRef.current?.emit('settings:changed', { settings: normalizedSettings });
           } catch (e) {
             console.error("Failed to save settings:", e);
+            throw e;
           }
 
           setIsSettingsOpen(false);
         }}
-        installedExtensions={installedExtensions}
-        extensionErrors={extensionErrors}
-        onRefreshExtensions={refreshExtensions}
       />
 
       <NotificationToast
         notification={toastNotification}
         onClose={() => setToastNotification(null)}
+        onSnooze={handleToastSnooze}
+      />
+
+      <CommandPalette
+        isOpen={isCommandPaletteOpen}
+        onClose={() => setIsCommandPaletteOpen(false)}
+        actions={commandActions}
       />
 
       <RemindersModal

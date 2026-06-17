@@ -177,6 +177,54 @@ jobs:
           prerelease: false
           args: ${{ matrix.args }}
 
+      - name: Package Windows portable
+        if: matrix.platform == 'windows-latest' && matrix.args == ''
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ needs.bump-version.outputs.new_tag || github.ref_name }}
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          $portableRoot = Join-Path $PWD "portable"
+          $portableDir = Join-Path $portableRoot "Caltemp"
+          $dataDir = Join-Path $portableDir "data"
+          $exeSource = Join-Path $PWD "src-tauri\target\release\caltemp.exe"
+          $exeTarget = Join-Path $portableDir "Caltemp.exe"
+          $zipPath = Join-Path $PWD "Caltemp_${version}_windows_x64_portable.zip"
+
+          if (!(Test-Path $exeSource)) {
+            throw "Executable not found at $exeSource"
+          }
+
+          New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
+          Copy-Item $exeSource $exeTarget -Force
+
+          @(
+            '@echo off',
+            'set "CALTEMP_PORTABLE=1"',
+            'start "" "%~dp0Caltemp.exe" --portable %*'
+          ) | Set-Content -Encoding ASCII (Join-Path $portableDir "Caltemp-portable.cmd")
+
+          @(
+            'Caltemp portable',
+            '=================',
+            '',
+            'Lancez Caltemp avec Caltemp-portable.cmd pour conserver les donnees dans ce dossier.',
+            '',
+            'Donnees locales :',
+            '- data\events.json',
+            '- data\settings.json',
+            '',
+            "Cette archive portable n'utilise pas l'installateur Windows et n'est pas ciblee par l'auto-update."
+          ) | Set-Content -Encoding UTF8 (Join-Path $portableDir "README-portable.txt")
+
+          if (Test-Path $zipPath) {
+            Remove-Item $zipPath -Force
+          }
+          Compress-Archive -Path (Join-Path $portableDir "*") -DestinationPath $zipPath -Force
+
+          gh release upload $env:TAG_NAME $zipPath --clobber
+
   generate-updater-json:
     needs: [release, bump-version]
     if: always() && (needs.release.result == 'success')

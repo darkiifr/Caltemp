@@ -2,10 +2,16 @@ import React from 'react';
 import { X, Minus, Square } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
-export default function Titlebar({ style = 'macos', osType }) {
+export default function Titlebar({ style = 'macos', osType, notificationBadge = 0 }) {
     if (style === 'none') return null;
 
-    const appWindow = () => getCurrentWindow();
+    const getAppWindow = () => {
+        try {
+            return getCurrentWindow();
+        } catch {
+            return null;
+        }
+    };
 
     const getTitle = () => {
         if (!osType) return 'Caltemp';
@@ -15,22 +21,22 @@ export default function Titlebar({ style = 'macos', osType }) {
 
     const handleClose = async (e) => {
         e.stopPropagation();
-        await appWindow().close();
+        await getAppWindow()?.close();
     };
 
     const handleMinimize = async (e) => {
         e.stopPropagation();
-        await appWindow().minimize();
+        await getAppWindow()?.minimize();
     };
 
     const handleMaximize = async (e) => {
         e.stopPropagation();
-        await appWindow().toggleMaximize();
+        await getAppWindow()?.toggleMaximize();
     };
 
     const handleTitlebarDoubleClick = async (e) => {
         if (e.target.closest('button')) return;
-        await appWindow().toggleMaximize();
+        await getAppWindow()?.toggleMaximize();
     };
 
     // macOS style: rounded buttons on the left
@@ -66,6 +72,11 @@ export default function Titlebar({ style = 'macos', osType }) {
                 </div>
                 <div className="text-xs font-medium text-white/30 pointer-events-none" data-tauri-drag-region>
                     {getTitle()}
+                    {notificationBadge > 0 && (
+                        <span className="ml-2 rounded-full bg-amber-500/20 px-2 py-0.5 text-amber-200">
+                            {notificationBadge}
+                        </span>
+                    )}
                 </div>
                 <div className="w-16" data-tauri-drag-region></div>
             </div>
@@ -82,6 +93,11 @@ export default function Titlebar({ style = 'macos', osType }) {
             >
                 <div className="flex-1 px-4 pointer-events-none">
                     <div className="text-sm font-medium text-gray-300">{getTitle()}</div>
+                    {notificationBadge > 0 && (
+                        <span className="ml-2 rounded-full bg-amber-500/20 px-2 py-0.5 text-xs text-amber-200">
+                            {notificationBadge}
+                        </span>
+                    )}
                 </div>
                 <div className="flex h-full" onMouseDown={(e) => e.stopPropagation()}>
                     <button
