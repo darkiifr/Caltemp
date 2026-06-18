@@ -51,12 +51,13 @@ export class ExtensionManager {
     this.eventBus = new ExtensionEventBus();
     this.installed = [];
     this.activePlugins = new Map();
-    this.appliedThemeVariables = new Set();
+    this.appliedThemeVariables = new Map();
     this.errors = [];
   }
 
   async initialize() {
     this.errors = [];
+    this.clearTheme();
     this.installed = await this.loadInstalled();
 
     for (const extensionRecord of this.installed) {
@@ -128,19 +129,29 @@ export class ExtensionManager {
   applyTheme(manifest) {
     if (!this.rootStyle) return;
     this.clearTheme();
+    const variables = new Set();
     for (const [name, value] of Object.entries(manifest.theme.variables)) {
       this.rootStyle.setProperty(name, value);
-      this.appliedThemeVariables.add(name);
+      variables.add(name);
     }
+    this.appliedThemeVariables.set(manifest.id, variables);
     this.eventBus.emit('theme:changed', { id: manifest.id, variables: manifest.theme.variables });
   }
 
-  clearTheme() {
+  clearTheme(extensionId = null) {
     if (!this.rootStyle) return;
-    for (const variable of this.appliedThemeVariables) {
-      this.rootStyle.removeProperty(variable);
+    const entries = extensionId
+      ? [[extensionId, this.appliedThemeVariables.get(extensionId) || new Set()]]
+      : Array.from(this.appliedThemeVariables.entries());
+
+    for (const [, variables] of entries) {
+      for (const variable of variables) {
+        this.rootStyle.removeProperty(variable);
+      }
     }
-    this.appliedThemeVariables.clear();
+
+    if (extensionId) this.appliedThemeVariables.delete(extensionId);
+    else this.appliedThemeVariables.clear();
   }
 
   emit(eventName, payload) {

@@ -1,15 +1,84 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { X, Trash2 } from 'lucide-react';
-import { generateText, searchWeb } from '../services/ai';
+import { X } from 'lucide-react';
+import { generateText, isAiConfigured, searchWeb } from '../services/ai';
 import { playBubbleSound } from '../utils/sound';
 import { PromptInputBox } from './ui/ai-prompt-box';
 import { motion, AnimatePresence } from 'framer-motion';
 import CanvasView from './CanvasView';
-import { Search, Loader2, Sparkles, MessageSquare, CornerDownLeft, Command, Eraser } from 'lucide-react';
+import { Search, Loader2, MessageSquare, CornerDownLeft, Plus, Trash2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ChevronDown, ChevronUp, Brain, FileText as FileIcon } from 'lucide-react';
+import { ChevronDown, ChevronUp, Brain } from 'lucide-react';
 import { handleLocalDexterCommand } from '../domain/dexterLocal';
+import { parseDexterAction, removeDexterActionJson } from '../domain/dexterActions';
+import { getNextOccurrence } from '../domain/events';
+
+const DEXTER_HISTORY_STORAGE_KEY = 'caltemp.dexter.conversations.v1';
+
+function safeReadStorage(key, fallback = null) {
+    if (typeof window === 'undefined') return fallback;
+    try {
+        return window.localStorage.getItem(key) ?? fallback;
+    } catch {
+        return fallback;
+    }
+}
+
+function safeWriteStorage(key, value) {
+    if (typeof window === 'undefined') return;
+    try {
+        window.localStorage.setItem(key, value);
+    } catch {
+        // Ignore storage quota/privacy errors. Dexter stays usable in memory.
+    }
+}
+
+function conversationTitle(messages = []) {
+    const firstUser = messages.find(message => message.role === 'user' && message.content?.trim());
+    return firstUser?.content?.trim().slice(0, 52) || 'Nouvelle discussion';
+}
+
+function createConversation(messages = []) {
+    const now = Date.now();
+    return {
+        id: `dexter-${now}-${Math.random().toString(36).slice(2, 8)}`,
+        title: conversationTitle(messages),
+        messages,
+        createdAt: now,
+        updatedAt: now,
+    };
+}
+
+function loadDexterHistoryState() {
+    const empty = createConversation([]);
+    const raw = safeReadStorage(DEXTER_HISTORY_STORAGE_KEY);
+    if (!raw) return { conversations: [empty], activeId: empty.id };
+    try {
+        const parsed = JSON.parse(raw);
+        const conversations = Array.isArray(parsed?.conversations)
+            ? parsed.conversations
+                .filter(item => item?.id)
+                .map(item => ({
+                    ...item,
+                    title: item.title || conversationTitle(item.messages || []),
+                    messages: Array.isArray(item.messages) ? item.messages : [],
+                    updatedAt: item.updatedAt || item.createdAt || Date.now(),
+                }))
+            : [];
+        if (!conversations.length) return { conversations: [empty], activeId: empty.id };
+        const activeId = conversations.some(item => item.id === parsed?.activeId) ? parsed.activeId : conversations[0].id;
+        return { conversations, activeId };
+    } catch {
+        return { conversations: [empty], activeId: empty.id };
+    }
+}
+
+function saveDexterHistoryState(conversations, activeId) {
+    safeWriteStorage(DEXTER_HISTORY_STORAGE_KEY, JSON.stringify({
+        conversations: conversations.slice(0, 30),
+        activeId,
+    }));
+}
 
 const ThoughtBlock = React.memo(({ content }) => {
     const [isExpanded, setIsExpanded] = useState(false);
@@ -132,13 +201,81 @@ const MessageItem = React.memo(({ msg }) => {
 });
 MessageItem.displayName = "MessageItem";
 
-export default function Dexter({ onClose, settings, events = [], onAddEvent }) {
-    const [messages, setMessages] = useState([]);
+function getDexterEventDate(event) {
+    const value = event?.date || event?.start || event?.startDate;
+    const date = value ? new Date(value) : null;
+    return date && !Number.isNaN(date.getTime()) ? date : null;
+}
+
+function buildDexterCalendarContext(events = [], settings = {}) {
+    const now = new Date();
+    const categoryLegend = settings?.categoryLegend || {};
+    const upcoming = events
+        .map(event => ({ event, date: getNextOccurrence(event, now) || getDexterEventDate(event) }))
+        .filter(item => item.date && item.date >= now)
+        .sort((a, b) => a.date - b.date)
+        .slice(0, 40);
+
+    if (!upcoming.length) {
+        return 'Rappels à venir dans Caltemp : aucun événement futur enregistré.';
+    }
+
+    const lines = upcoming.map(({ event, date }) => {
+        const category = event.category || 'sans-categorie';
+        const categoryLabel = categoryLegend[category]?.label || category;
+        const tags = Array.isArray(event.tags) && event.tags.length ? `, tags=${event.tags.join('|')}` : '';
+        return `- id=${event.id} | ${date.toISOString()} | ${event.title || 'Sans titre'} | catégorie=${categoryLabel} | alerte=${event.reminder ? 'oui' : 'non'}${tags}`;
+    });
+
+    return `Rappels à venir dans Caltemp (${upcoming.length}/${events.length} affichés, triés par date) :\n${lines.join('\n')}`;
+}
+
+export default function Dexter({ onClose, settings, events = [], onAddEvent, onOpenSettingsTab, onExportPng, onExportPdf }) {
+    const initialHistoryRef = useRef(null);
+    if (!initialHistoryRef.current) initialHistoryRef.current = loadDexterHistoryState();
+    const [conversationHistory, setConversationHistory] = useState(initialHistoryRef.current.conversations);
+    const [activeConversationId, setActiveConversationId] = useState(initialHistoryRef.current.activeId);
+    const [messages, setMessages] = useState(() => (
+        initialHistoryRef.current.conversations.find(item => item.id === initialHistoryRef.current.activeId)?.messages || []
+    ));
     const [isTyping, setIsTyping] = useState(false);
     const [isSearching, setIsSearching] = useState(false);
     const [canvasContent, setCanvasContent] = useState(null);
     const messagesEndRef = useRef(null);
     const abortControllerRef = useRef(null);
+    const referencedEventIdRef = useRef(null);
+    const quickPrompts = [
+        'Résume ma semaine',
+        'Montre les catégories',
+        'Explique mes alertes',
+        'Ouvre les paramètres IA',
+    ];
+
+    useEffect(() => {
+        try {
+            window.localStorage.removeItem('caltemp.dexter.selectedModel.v1');
+        } catch {
+            // Ignore storage quota/privacy errors. Dexter no longer stores a model preference.
+        }
+    }, []);
+
+    useEffect(() => {
+        setConversationHistory(prev => {
+            const exists = prev.some(item => item.id === activeConversationId);
+            const base = exists ? prev : [createConversation([]), ...prev];
+            const updated = base.map(item => {
+                if (item.id !== activeConversationId) return item;
+                return {
+                    ...item,
+                    title: conversationTitle(messages),
+                    messages,
+                    updatedAt: Date.now(),
+                };
+            }).sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
+            saveDexterHistoryState(updated, activeConversationId);
+            return updated;
+        });
+    }, [activeConversationId, messages]);
 
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -164,6 +301,46 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent }) {
         }
     }, []);
 
+    const startNewConversation = React.useCallback(() => {
+        handleAbort();
+        const conversation = createConversation([]);
+        referencedEventIdRef.current = null;
+        setCanvasContent(null);
+        setConversationHistory(prev => {
+            const next = [conversation, ...prev].slice(0, 30);
+            saveDexterHistoryState(next, conversation.id);
+            return next;
+        });
+        setActiveConversationId(conversation.id);
+        setMessages([]);
+    }, [handleAbort]);
+
+    const selectConversation = React.useCallback((conversationId) => {
+        const conversation = conversationHistory.find(item => item.id === conversationId);
+        if (!conversation) return;
+        handleAbort();
+        referencedEventIdRef.current = null;
+        setCanvasContent(null);
+        setActiveConversationId(conversation.id);
+        setMessages(conversation.messages || []);
+        saveDexterHistoryState(conversationHistory, conversation.id);
+    }, [conversationHistory, handleAbort]);
+
+    const deleteConversation = React.useCallback((conversationId) => {
+        setConversationHistory(prev => {
+            const remaining = prev.filter(item => item.id !== conversationId);
+            const next = remaining.length ? remaining : [createConversation([])];
+            const nextActiveId = activeConversationId === conversationId ? next[0].id : activeConversationId;
+            saveDexterHistoryState(next, nextActiveId);
+            if (activeConversationId === conversationId) {
+                setActiveConversationId(nextActiveId);
+                setMessages(next[0].messages || []);
+                referencedEventIdRef.current = null;
+            }
+            return next;
+        });
+    }, [activeConversationId]);
+
     const handleSend = async (inputValue, files = []) => {
         if (!inputValue.trim() && files.length === 0) return;
 
@@ -188,10 +365,31 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent }) {
         setIsTyping(true);
         if (isSearch) setIsSearching(true);
 
-        const localCommand = handleLocalDexterCommand(cleanValue, { events, now: new Date() });
+        const localCommand = handleLocalDexterCommand(cleanValue, {
+            events,
+            settings,
+            now: new Date(),
+            referencedEventId: referencedEventIdRef.current,
+        });
         if (localCommand.handled) {
             if (localCommand.type === 'create-event' && localCommand.event) {
                 await onAddEvent(localCommand.event);
+            }
+            if (localCommand.type === 'update-event' && localCommand.event) {
+                await onAddEvent(localCommand.event);
+            }
+            const referencedEvent = localCommand.event || localCommand.data;
+            if (referencedEvent?.id) {
+                referencedEventIdRef.current = referencedEvent.id;
+            }
+            if (localCommand.type === 'open-settings') {
+                onOpenSettingsTab?.(localCommand.tab || 'general');
+            }
+            if (localCommand.type === 'export-png') {
+                await onExportPng?.();
+            }
+            if (localCommand.type === 'export-pdf') {
+                await onExportPdf?.();
             }
             setMessages(prev => [...prev, {
                 id: Date.now() + 1,
@@ -204,9 +402,21 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent }) {
             return;
         }
 
+        if (settings?.aiEnabled === false) {
+            setMessages(prev => [...prev, {
+                id: Date.now() + 1,
+                role: 'assistant',
+                type: 'error',
+                content: "Dexter est désactivé dans les paramètres. Demande-moi d’ouvrir les paramètres IA pour le réactiver.",
+            }]);
+            setIsTyping(false);
+            setIsSearching(false);
+            abortControllerRef.current = null;
+            return;
+        }
 
 
-        if (settings?.aiApiKey) {
+        if (isAiConfigured()) {
             try {
                 let aiMessages = [];
                 let userContent = [{ type: "text", text: userMsg.content || "Veuillez analyser ce document ou cet audio." }];
@@ -241,22 +451,24 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent }) {
                 }));
 
                 const now = new Date();
-                let systemInstruction = `Tu es Dexter, l'assistant intelligent de Caltemp. Nous sommes le ${now.toLocaleString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}. Ton objectif est d'aider l'utilisateur à gérer ses événements et ses notes de manière efficace et conviviale.`;
+                const legendLines = Object.entries(settings?.categoryLegend || {})
+                    .map(([key, meta]) => `${key}=${meta?.label || key}`)
+                    .join(', ');
+                const calendarContext = buildDexterCalendarContext(events, settings);
+                let systemInstruction = `Tu es Dexter, l'assistant intelligent de Caltemp. Nous sommes le ${now.toLocaleString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}. Tu aides à gérer un calendrier local, des notes, des catégories, des rappels et des imports ICS. Catégories disponibles : ${legendLines || 'cours, devoir, examen, perso, dev'}.\n\n${calendarContext}`;
                 
                 if (isSearch) systemInstruction += "\n\nINFORMATIONS TROUVÉES SUR LE WEB :\nTu dois baser ta réponse sur ces informations contextuelles. NE GÉNÈRE AUCUN JSON NI REQUÊTE DE RECHERCHE, réponds directement à l'utilisateur en langage naturel.";
                 if (isCanvas) systemInstruction += "\nL'utilisateur souhaite utiliser le Canvas pour une réponse détaillée.";
 
                 const systemPrompt = {
                     role: "system",
-                    content: `${systemInstruction}\n\nDIRECTIVES IMPORTANTES:\n1. Si l'utilisateur te demande de créer un événement ou un rappel, réponds TOUJOURS avec un bloc JSON entouré de balises de code: \`\`\`json\n{"action": "create_event", "data": {"title": "...", "date": "ISO8601 complète", "description": "...", "recurrence": "none|daily|weekly|monthly|yearly", "reminder": true}}\n\`\`\`\n2. Fais très attention aux dates. Si c'est un anniversaire, mets "recurrence": "yearly".\n3. Utilise le Markdown pour formater tes réponses (gras, listes, etc.) pour le reste de la discussion.`
+                    content: `${systemInstruction}\n\nDIRECTIVES IMPORTANTES:\n1. Si l'utilisateur demande une information déjà présente dans les rappels à venir ci-dessus, réponds avec ces données locales et ne dis jamais que tu n'as pas accès au calendrier.\n2. Si l'utilisateur te demande de créer un événement ou un rappel, réponds TOUJOURS avec un bloc JSON entouré de balises de code: \`\`\`json\n{"action": "create_event", "data": {"title": "...", "date": "ISO8601 complète", "description": "...", "category": "cours|devoir|examen|perso|dev ou catégorie existante", "color": "#60a5fa si pertinent", "tags": ["..."], "recurrence": "none|daily|weekly|monthly|yearly", "reminder": true, "durationMinutes": 60}}\n\`\`\`\n3. Si l'utilisateur demande de modifier un rappel existant listé ci-dessus, utilise son id exact et réponds avec : \`\`\`json\n{"action": "update_event", "data": {"id": "...", "title": "... optionnel", "date": "ISO8601 optionnel", "category": "... optionnel", "reminder": true}}\n\`\`\`\n4. Utilise une date ISO complète et valide. Pour un anniversaire, mets "recurrence": "yearly".\n5. N'invente pas d'action dangereuse : imports, exports, suppressions larges et grands changements de paramètres doivent ouvrir ou expliquer le flux UI de confirmation.\n6. Tu peux répondre sur catégories, légendes, alertes, routines, imports ICS, statistiques et notes en Markdown clair.`
                 };
 
                 // --- SEARCH PHASE ---
                 let searchContext = "";
                 if (isSearch) {
                     const searchQuery = await generateText({
-                        apiKey: settings.aiApiKey,
-                        model: settings.aiModel,
                         messages: [...history, { role: 'user', content: `Génère uniquement 1 ou 2 mots-clés de recherche très courts pour : "${userMsg.content}"` }],
                         signal: abortControllerRef.current?.signal
                     });
@@ -275,8 +487,6 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent }) {
                 setMessages(prev => [...prev, { id: assistantMsgId, role: 'assistant', content: '', isStreaming: true }]);
                 
                 const response = await generateText({
-                    apiKey: settings.aiApiKey,
-                    model: settings.aiModel,
                     messages: aiMessages,
                     context: searchContext,
                     think: isThink,
@@ -308,57 +518,83 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent }) {
 
 
 
-                // Check for JSON in response (more robust parsing)
-                const jsonRegex = /```json\s*(\{[\s\S]*?\})\s*```|(\{[\s\S]*"action":\s*"create_event"[\s\S]*?\})/;
-                const jsonMatch = response.match(jsonRegex);
+                const actionResult = parseDexterAction(response);
+                const hadActionJson = response.includes('"action"') || response.includes('```json');
 
-                if (jsonMatch) {
+                if (actionResult.ok && actionResult.action === 'create_event') {
+                    const finalEvent = {
+                        ...actionResult.data,
+                        id: Date.now().toString(),
+                    };
+
+                    await onAddEvent(finalEvent);
+
+                    let dateStr = "Date non spécifiée";
                     try {
-                        const jsonStr = jsonMatch[1] || jsonMatch[2];
-                        const jsonData = JSON.parse(jsonStr);
-                        if (jsonData.action === 'create_event') {
-                            const eventData = jsonData.data || jsonData;
-                            
-                            const finalEvent = {
-                                ...eventData,
-                                id: Date.now().toString()
-                            };
-
-                            onAddEvent(finalEvent);
-                            
-                            let dateStr = "Date non spécifiée";
-                            try {
-                                const d = new Date(finalEvent.date);
-                                if (!isNaN(d.getTime())) {
-                                    dateStr = d.toLocaleString('fr-FR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-                                } else {
-                                    dateStr = finalEvent.date;
-                                }
-                            } catch (e) {
-                                dateStr = finalEvent.date;
-                            }
-
-                            setMessages(prev => prev.map(msg => 
-                                msg.id === assistantMsgId ? { ...msg, content: `✅ **C'est noté !**\n\n**Titre :** ${finalEvent.title}\n**Date :** ${dateStr}`, isStreaming: false } : msg
-                            ));
-                            
-                            if (isSearch) setIsSearching(false);
-                            return; // Stop here, event is created
+                        const d = new Date(finalEvent.date);
+                        if (!isNaN(d.getTime())) {
+                            dateStr = d.toLocaleString('fr-FR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+                        } else {
+                            dateStr = finalEvent.date;
                         }
-                    } catch (e) {
-                        console.error("Failed to parse AI JSON command:", e);
+                    } catch {
+                        dateStr = finalEvent.date;
                     }
+
+                    setMessages(prev => prev.map(msg =>
+                        msg.id === assistantMsgId ? { ...msg, content: `✅ **C'est noté !**\n\n**Titre :** ${finalEvent.title}\n**Date :** ${dateStr}`, isStreaming: false } : msg
+                    ));
+
+                    if (isSearch) setIsSearching(false);
+                    return;
+                } else if (actionResult.ok && actionResult.action === 'update_event') {
+                    const existingEvent = events.find(event => event.id === actionResult.data.id);
+                    if (!existingEvent) {
+                        setMessages(prev => prev.map(msg =>
+                            msg.id === assistantMsgId ? { ...msg, content: "Je n’ai pas trouvé ce rappel dans Caltemp. Réessaie avec un mot du titre du rappel.", isStreaming: false } : msg
+                        ));
+                        if (isSearch) setIsSearching(false);
+                        return;
+                    }
+
+                    const finalEvent = {
+                        ...existingEvent,
+                        ...actionResult.data,
+                        id: existingEvent.id,
+                    };
+
+                    await onAddEvent(finalEvent);
+
+                    let dateStr = "Date inchangée";
+                    try {
+                        const d = new Date(finalEvent.date);
+                        if (!isNaN(d.getTime())) {
+                            dateStr = d.toLocaleString('fr-FR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+                        }
+                    } catch {
+                        dateStr = finalEvent.date || dateStr;
+                    }
+
+                    setMessages(prev => prev.map(msg =>
+                        msg.id === assistantMsgId ? { ...msg, content: `✅ **Rappel modifié.**\n\n**Titre :** ${finalEvent.title}\n**Date :** ${dateStr}\n**Alerte :** ${finalEvent.reminder ? 'activée' : 'désactivée'}`, isStreaming: false } : msg
+                    ));
+
+                    if (isSearch) setIsSearching(false);
+                    return;
+                } else if (hadActionJson) {
+                    console.warn("Dexter action ignored:", actionResult.error);
                 }
 
                 // If not an event, display cleaned response
-                let cleanResponse = response
-                    .replace(/```json\s*(\{[\s\S]*?\})\s*```/g, '')
+                let cleanResponse = removeDexterActionJson(response)
                     .replace(/Search web\.\{.*?\}/g, '')
                     .replace(/^\{"query":.*?"source":.*?"\}\s*/g, '')
                     .replace(/^\{"query":.*?\}\s*/g, '')
                     .trim();
                     
-                if (!cleanResponse) {
+                if (!cleanResponse && hadActionJson && !actionResult.ok) {
+                    cleanResponse = `Je n’ai pas pu exécuter l’action demandée : ${actionResult.error}`;
+                } else if (!cleanResponse) {
                     cleanResponse = "Opération terminée.";
                 }
 
@@ -391,7 +627,7 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent }) {
                 id: Date.now(), 
                 role: 'assistant', 
                 type: 'error',
-                content: "Veuillez configurer votre clé OpenRouter dans les paramètres." 
+                    content: "Dexter peut déjà répondre aux commandes locales, mais l’intégration IA n’est pas configurée dans ce build."
             }]);
             setIsTyping(false);
         }
@@ -399,14 +635,50 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent }) {
 
     return (
         <div className="flex h-full w-full overflow-hidden bg-[#0a0a0a] relative">
+            <aside className="hidden w-72 shrink-0 border-r border-white/10 bg-[#111111] p-3 lg:flex lg:flex-col">
+                <button
+                    type="button"
+                    onClick={startNewConversation}
+                    className="mb-3 flex h-11 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 text-sm font-medium text-white transition-colors hover:bg-white/[0.08]"
+                >
+                    <Plus className="h-4 w-4" />
+                    Nouvelle discussion
+                </button>
+                <div className="mb-2 px-2 text-[11px] font-semibold uppercase tracking-wider text-white/35">Historique</div>
+                <div className="min-h-0 flex-1 space-y-1 overflow-y-auto custom-scrollbar">
+                    {conversationHistory.map((conversation) => {
+                        const selected = conversation.id === activeConversationId;
+                        return (
+                            <div key={conversation.id} className={`group flex items-center gap-1 rounded-xl ${selected ? 'bg-white/10' : 'hover:bg-white/[0.06]'}`}>
+                                <button
+                                    type="button"
+                                    onClick={() => selectConversation(conversation.id)}
+                                    className="min-w-0 flex-1 px-3 py-2.5 text-left"
+                                    title={conversation.title}
+                                >
+                                    <div className={`truncate text-sm ${selected ? 'text-white' : 'text-white/72'}`}>{conversation.title}</div>
+                                    <div className="mt-0.5 text-[11px] text-white/28">
+                                        {conversation.messages?.length || 0} message{(conversation.messages?.length || 0) > 1 ? 's' : ''}
+                                    </div>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => deleteConversation(conversation.id)}
+                                    className="mr-1 rounded-lg p-1.5 text-white/0 transition-colors hover:bg-red-400/10 hover:text-red-200 group-hover:text-white/35"
+                                    title="Supprimer la discussion"
+                                >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                            </div>
+                        );
+                    })}
+                </div>
+            </aside>
             {/* Split Screen Logic */}
             <div className="flex-1 flex flex-col min-w-0 relative z-10">
                 {/* Header */}
                 <div className="h-16 flex items-center justify-between px-6 shrink-0 border-b border-white/5 bg-[#0a0a0a]">
                     <div className="flex items-center gap-3">
-                        <div className="p-2 bg-white/10 text-white rounded-lg">
-                             <Sparkles className="w-5 h-5" />
-                        </div>
                         <div>
                             <h1 className="text-xl font-semibold tracking-tight text-white">Dexter</h1>
                         </div>
@@ -420,11 +692,11 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent }) {
                     
                     <div className="flex items-center gap-1">
                         <button 
-                            onClick={() => { playBubbleSound(); setMessages([]); setCanvasContent(null); }}
+                            onClick={() => { playBubbleSound(); startNewConversation(); }}
                             className="p-2 text-white/40 hover:text-white hover:bg-white/5 rounded-xl transition-all group"
                             title="Nouvelle conversation"
                         >
-                            <Eraser className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                            <Plus className="w-5 h-5 group-hover:scale-110 transition-transform" />
                         </button>
                         <div className="w-px h-4 bg-white/10 mx-2" />
                         <button 
@@ -440,13 +712,25 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent }) {
                 <div className="flex-1 overflow-y-auto p-6 md:p-10 custom-scrollbar scroll-smooth">
                     <div className="max-w-3xl mx-auto space-y-10">
                         {messages.length === 0 && (
-                            <div className="flex flex-col items-center justify-center py-20 text-center space-y-4 opacity-50">
+                            <div className="flex flex-col items-center justify-center py-16 text-center">
                                 <div className="p-5 bg-white/5 rounded-full border border-white/5 shadow-2xl">
                                     <MessageSquare className="w-10 h-10 text-white/40" />
                                 </div>
-                                <div>
+                                <div className="mt-4">
                                     <h2 className="text-xl font-medium text-white">Comment puis-je vous aider ?</h2>
-                                    <p className="text-sm text-white/40 mt-1 max-w-sm">Demandez-moi de créer un événement, de chercher quelque chose ou simplement de discuter.</p>
+                                    <p className="text-sm text-white/40 mt-1 max-w-sm">Créez un événement, analysez vos rappels ou ouvrez un flux de réglage sans quitter Caltemp.</p>
+                                </div>
+                                <div className="mt-6 grid w-full max-w-xl gap-2 sm:grid-cols-2">
+                                    {quickPrompts.map((prompt) => (
+                                        <button
+                                            key={prompt}
+                                            type="button"
+                                            onClick={() => handleSend(prompt)}
+                                            className="rounded-lg border border-white/10 bg-white/[0.04] px-4 py-3 text-left text-sm text-white/75 transition-colors hover:bg-white/[0.08] hover:text-white"
+                                        >
+                                            {prompt}
+                                        </button>
+                                    ))}
                                 </div>
                             </div>
                         )}
@@ -500,12 +784,6 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent }) {
                                 onAbort={handleAbort}
                                 placeholder="Posez vos questions à Dexter..." 
                             />
-                        </div>
-                        <div className="mt-3 flex items-center justify-center gap-4 opacity-30">
-                            <div className="flex items-center gap-1.5 text-[10px] text-white font-medium uppercase tracking-widest">
-                                <Command className="w-3 h-3" />
-                                <span>Entrée pour envoyer</span>
-                            </div>
                         </div>
                     </div>
                 </div>

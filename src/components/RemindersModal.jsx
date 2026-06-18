@@ -1,7 +1,8 @@
 import React, { useState, useMemo } from 'react';
 import { X, ListTodo, Search, Trash2, Repeat, Calendar as CalendarIcon, Bell } from 'lucide-react';
+import { formatEventDate } from '../domain/events';
 
-export default function RemindersModal({ isOpen, onClose, events, onDeleteEvent }) {
+export default function RemindersModal({ isOpen, onClose, events, onDeleteEvent, settings = {} }) {
     const [searchTerm, setSearchTerm] = useState('');
     const [deletingId, setDeletingId] = useState(null);
 
@@ -122,7 +123,7 @@ export default function RemindersModal({ isOpen, onClose, events, onDeleteEvent 
                                         deletingId={deletingId}
                                         setDeletingId={setDeletingId}
                                         onDelete={onDeleteEvent}
-                                        label={new Date(event.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                                        label={formatEventDate(event.date, settings, { includeTime: false })}
                                         icon={<CalendarIcon className="w-3.5 h-3.5 text-blue-400" />}
                                     />
                                 ))}

@@ -22,10 +22,14 @@ import { clearDiscordPresence, updateDiscordPresence } from "./services/discordR
 import { consumeRuntimeSession, saveRuntimeSession } from "./services/runtimeSession";
 
 import { playBubbleSound, playRingtone, playNotificationSound, configureSounds, resumeAudioContext } from "./utils/sound";
-import { normalizeEvent, normalizeEvents, normalizeSettings } from "./domain/events";
+import { formatEventDate, normalizeEvent, normalizeEvents, normalizeSettings } from "./domain/events";
+import { recordAiUsage } from "./domain/aiUsage";
+import { applyIcsImportOptions } from "./domain/icsImport";
 import { applyNotificationMarks, buildReminderNotifications, snoozeEventOccurrence } from "./domain/reminders";
 import { exportElementAsPdf, exportElementAsPng } from "./utils/exportView";
 import { FastAverageColor } from "fast-average-color";
+import { resolveBackgroundImageUrl } from "./utils/background";
+import { getCompatibleWindowEffect } from "./utils/windowEffects";
 
 function App() {
   const [events, setEvents] = useState([]);
@@ -70,6 +74,27 @@ function App() {
     settingsRef.current = settings;
   }, [settings]);
 
+  useEffect(() => {
+    const handleAiUsage = async (event) => {
+      const current = settingsRef.current || {};
+      const next = normalizeSettings({
+        ...current,
+        aiUsageStats: recordAiUsage(current.aiUsageStats, event.detail),
+      });
+      settingsRef.current = next;
+      setSettings(next);
+      if (!window.__TAURI_INTERNALS__) return;
+      try {
+        await saveSettings(next);
+      } catch (error) {
+        console.error('Failed to save AI usage stats:', error);
+      }
+    };
+
+    window.addEventListener('caltemp:ai-usage', handleAiUsage);
+    return () => window.removeEventListener('caltemp:ai-usage', handleAiUsage);
+  }, []);
+
   // Load Data
   useEffect(() => {
     async function initData() {
@@ -109,13 +134,15 @@ function App() {
         // If loadedSettings is empty (first run), defaults will be used.
         // If loadedSettings has some keys, they override defaults.
         // We merge defaults first, then loadedSettings.
-        const finalSettings = normalizeSettings({ ...defaultSettings, ...loadedSettings });
+        const finalSettings = normalizeSettings({
+          ...defaultSettings,
+          ...loadedSettings,
+          windowEffect: getCompatibleWindowEffect(loadedSettings?.windowEffect || defaultSettings.windowEffect, os),
+        });
         const runtimeSession = isTauriRuntime ? await consumeRuntimeSession() : null;
 
         // Configure sounds
-        if (finalSettings.soundConfig) {
-          configureSounds(finalSettings.soundConfig);
-        }
+        configureSounds(finalSettings.soundConfig || {});
 
         setEvents(normalizeEvents(loadedEvents || [], finalSettings));
         setSettings(finalSettings);
@@ -133,7 +160,7 @@ function App() {
 
         // Apply window effect on startup
         if (finalSettings.windowEffect) {
-          invoke('set_window_effect', { effect: finalSettings.windowEffect });
+          invoke('set_window_effect', { effect: getCompatibleWindowEffect(finalSettings.windowEffect, os) });
         }
 
         // Attempt to resume audio context on first user interaction
@@ -168,7 +195,7 @@ function App() {
   useEffect(() => {
     if (!currentSettings.appBackground || currentSettings.autoAccentFromBackground === false) return;
     const fac = new FastAverageColor();
-    fac.getColorAsync(currentSettings.appBackground, { crossOrigin: 'anonymous' })
+    fac.getColorAsync(resolveBackgroundImageUrl(currentSettings.appBackground), { crossOrigin: 'anonymous' })
       .then(color => {
         document.documentElement.style.setProperty('--caltemp-accent', color.hex);
       })
@@ -365,27 +392,30 @@ function App() {
 
   const handleSaveEvent = useCallback(async (newEvent) => {
     const normalizedEvent = normalizeEvent(newEvent, settings);
-    const updatedEvents = selectedEvent
+    const existingEvent = events.find(event => event.id === normalizedEvent.id);
+    const isUpdate = Boolean(selectedEvent || existingEvent);
+    const updatedEvents = isUpdate
       ? events.map(e => e.id === normalizedEvent.id ? normalizedEvent : e)
       : [...events, normalizedEvent];
 
     setEvents(updatedEvents);
     await saveEvents(updatedEvents);
     extensionManagerRef.current?.emit(
-      selectedEvent ? 'calendar:event-updated' : 'calendar:event-created',
+      isUpdate ? 'calendar:event-updated' : 'calendar:event-created',
       { event: normalizedEvent }
     );
 
     notify(
       'Événement enregistré',
-      `${normalizedEvent.title} le ${new Date(normalizedEvent.date).toLocaleDateString()}`,
+      `${normalizedEvent.title} le ${formatEventDate(normalizedEvent.date, settings)}`,
       'success'
     );
   }, [events, notify, selectedEvent, settings]);
 
-  const handleImportEvents = async (importedEvents) => {
+  const handleImportEvents = async (importedEvents, importOptions = {}) => {
     const knownKeys = new Set(events.map(event => event.externalId || `${event.title}:${event.date}`));
-    const normalizedImports = normalizeEvents(importedEvents, settings).filter(event => {
+    const preparedEvents = applyIcsImportOptions(importedEvents, importOptions);
+    const normalizedImports = normalizeEvents(preparedEvents, settings).filter(event => {
       const key = event.externalId || `${event.title}:${event.date}`;
       if (knownKeys.has(key)) return false;
       knownKeys.add(key);
@@ -438,6 +468,26 @@ function App() {
     setToastNotification(null);
   };
 
+  const handleExportPng = useCallback(async () => {
+    try {
+      await exportElementAsPng(calendarExportRef.current, 'caltemp.png');
+      notify('Export PNG', 'La vue calendrier a été exportée.', 'success');
+    } catch (error) {
+      console.error(error);
+      notify('Export PNG', error.message || 'Impossible d’exporter la vue.', 'error');
+    }
+  }, [notify]);
+
+  const handleExportPdf = useCallback(async () => {
+    try {
+      await exportElementAsPdf(calendarExportRef.current, 'caltemp.pdf');
+      notify('Export PDF', 'La vue calendrier a été exportée.', 'success');
+    } catch (error) {
+      console.error(error);
+      notify('Export PDF', error.message || 'Impossible d’exporter la vue.', 'error');
+    }
+  }, [notify]);
+
   const commandActions = useMemo(() => [
     {
       id: 'new-event',
@@ -467,12 +517,12 @@ function App() {
     {
       id: 'export-png',
       label: 'Exporter la vue en image PNG',
-      run: () => exportElementAsPng(calendarExportRef.current, 'caltemp.png').catch(console.error),
+      run: handleExportPng,
     },
     {
       id: 'export-pdf',
       label: 'Exporter la vue en PDF',
-      run: () => exportElementAsPdf(calendarExportRef.current, 'caltemp.pdf').catch(console.error),
+      run: handleExportPdf,
     },
     ...((settings.routines || []).map(routine => ({
       id: `routine-${routine.id}`,
@@ -492,7 +542,7 @@ function App() {
       },
     }))),
     ...extensionActions,
-  ], [settings, handleAddEvent, handleSaveEvent, extensionActions]);
+  ], [settings, handleAddEvent, handleSaveEvent, extensionActions, handleExportPng, handleExportPdf]);
 
   const handleRestartApp = useCallback(async () => {
     await saveRuntimeSession({
@@ -504,7 +554,7 @@ function App() {
   }, [calendarView, selectedDate]);
   
   const appBgStyle = isBackgroundActive ? {
-    backgroundImage: `url(${currentSettings.appBackground})`,
+    backgroundImage: `url("${resolveBackgroundImageUrl(currentSettings.appBackground)}")`,
     backgroundSize: 'cover',
     backgroundPosition: 'center'
   } : {};
@@ -585,6 +635,12 @@ function App() {
                 settings={currentSettings}
                 events={events}
                 onAddEvent={handleSaveEvent}
+                onOpenSettingsTab={(tab) => {
+                  setSettingsInitialTab(tab || 'general');
+                  setIsSettingsOpen(true);
+                }}
+                onExportPng={handleExportPng}
+                onExportPdf={handleExportPdf}
               />
             ) : (
               <div ref={calendarExportRef} className="flex-1 flex flex-col overflow-hidden relative transition-all duration-300">
@@ -638,14 +694,17 @@ function App() {
           setPreviewSettings(null);
           // Revert window effect if needed
           if (settings.windowEffect) {
-            invoke('set_window_effect', { effect: settings.windowEffect });
+            invoke('set_window_effect', { effect: getCompatibleWindowEffect(settings.windowEffect, osType) });
           }
           setIsSettingsOpen(false);
         }}
         settings={settings}
         onPreview={setPreviewSettings}
         onSave={async (newSettings) => {
-          const normalizedSettings = normalizeSettings(newSettings);
+          const normalizedSettings = normalizeSettings({
+            ...newSettings,
+            windowEffect: getCompatibleWindowEffect(newSettings.windowEffect, osType),
+          });
           setSettings(normalizedSettings);
           setPreviewSettings(null);
           
@@ -653,11 +712,9 @@ function App() {
             await saveSettings(normalizedSettings);
             // Re-apply window effect to ensure persistence
             if (normalizedSettings.windowEffect) {
-              await invoke('set_window_effect', { effect: normalizedSettings.windowEffect });
+              await invoke('set_window_effect', { effect: getCompatibleWindowEffect(normalizedSettings.windowEffect, osType) });
             }
-            if (normalizedSettings.soundConfig) {
-              configureSounds(normalizedSettings.soundConfig);
-            }
+            configureSounds(normalizedSettings.soundConfig || {});
             extensionManagerRef.current?.emit('settings:changed', { settings: normalizedSettings });
           } catch (e) {
             console.error("Failed to save settings:", e);
@@ -690,6 +747,7 @@ function App() {
         onClose={() => setIsRemindersOpen(false)}
         events={events}
         onDeleteEvent={handleDeleteEvent}
+        settings={currentSettings}
       />
 
       <ContextMenu

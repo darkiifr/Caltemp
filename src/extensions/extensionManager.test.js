@@ -63,6 +63,69 @@ describe('ExtensionManager', () => {
     expect(style.setProperty).toHaveBeenCalledWith('--caltemp-accent', '#67e8f9');
   });
 
+  it('does not apply disabled theme variables', async () => {
+    const style = { setProperty: vi.fn(), removeProperty: vi.fn() };
+    const manager = new ExtensionManager({
+      rootStyle: style,
+      store: {
+        listInstalled: async () => [
+          {
+            enabled: false,
+            manifest: {
+              id: 'com.caltemp.theme.disabled',
+              name: 'Disabled',
+              type: 'theme',
+              version: '1.0.0',
+              sdkVersion: '1.0.0',
+              compatibility: { caltemp: '>=6.0.0' },
+              permissions: [],
+              theme: { variables: { '--caltemp-accent': '#f97316' } },
+            },
+          },
+        ],
+      },
+    });
+
+    await manager.initialize();
+
+    expect(style.setProperty).not.toHaveBeenCalled();
+  });
+
+  it('removes stale theme variables before reinitializing extensions', async () => {
+    const style = { setProperty: vi.fn(), removeProperty: vi.fn() };
+    const records = [
+      {
+        enabled: true,
+        manifest: {
+          id: 'com.caltemp.theme.first',
+          name: 'First',
+          type: 'theme',
+          version: '1.0.0',
+          sdkVersion: '1.0.0',
+          compatibility: { caltemp: '>=6.0.0' },
+          permissions: [],
+          theme: { variables: { '--caltemp-accent': '#67e8f9', '--caltemp-panel': '#111827' } },
+        },
+      },
+    ];
+    const manager = new ExtensionManager({
+      rootStyle: style,
+      store: {
+        listInstalled: async () => records,
+      },
+    });
+
+    await manager.initialize();
+    records[0] = {
+      ...records[0],
+      enabled: false,
+    };
+    await manager.initialize();
+
+    expect(style.removeProperty).toHaveBeenCalledWith('--caltemp-accent');
+    expect(style.removeProperty).toHaveBeenCalledWith('--caltemp-panel');
+  });
+
   it('blocks SDK calendar writes without permission', async () => {
     const manager = new ExtensionManager({
       store: {

@@ -2,7 +2,7 @@
   "id": "com.caltemp.examples.french-football-gallery",
   "name": "Galerie Bleus",
   "type": "plugin",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "sdkVersion": "1.1.0",
   "compatibility": {
     "caltemp": ">=6.0.0"

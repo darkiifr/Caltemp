@@ -12,7 +12,8 @@
       "allow": [
         { "url": "https://openrouter.ai/**" },
         { "url": "https://raw.githubusercontent.com/**" },
-        { "url": "https://github.com/**" }
+        { "url": "https://github.com/**" },
+        { "url": "https://*/*" }
       ]
     },
     "core:window:allow-minimize",
@@ -20,6 +21,7 @@
     "core:window:allow-close",
     "core:window:allow-toggle-maximize",
     "core:window:allow-start-dragging",
+    "core:path:default",
     "fs:default",
     "fs:allow-app-write-recursive",
     "notification:default",

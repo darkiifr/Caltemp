@@ -560,7 +560,7 @@ export default function CalendarView({ events, settings = {}, onAddEvent, onEdit
                             <section key={day.date.toISOString()} className="grid gap-2">
                                 <div className="flex items-center gap-3 text-xs uppercase tracking-widest text-white/35">
                                     <span className="h-px flex-1 bg-white/10" />
-                                    <span>{day.date.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}</span>
+                                    <span>{formatEventDate(day.date, settings, { includeTime: false })}</span>
                                     <span className="h-px flex-1 bg-white/10" />
                                 </div>
                                 <div className="grid gap-2">
@@ -675,7 +675,7 @@ export default function CalendarView({ events, settings = {}, onAddEvent, onEdit
                     <div className="rounded-xl border border-white/5 bg-white/[0.06] p-4">
                         <div className="text-xs uppercase tracking-widest text-white/35">Jour le plus dense</div>
                         <div className="mt-2 text-lg font-semibold text-white">
-                            {new Date(busiestDay.date).toLocaleDateString('fr-FR', { weekday: 'long' })}
+                            {formatEventDate(busiestDay.date, settings, { includeTime: false })}
                         </div>
                     </div>
                 </div>
@@ -686,7 +686,7 @@ export default function CalendarView({ events, settings = {}, onAddEvent, onEdit
                         {stats.days.map(day => (
                             <div key={day.date} className="rounded-xl border border-white/5 bg-white/5 p-3 min-h-32 flex flex-col justify-between">
                                 <div>
-                                    <span className="text-xs text-white/40">{new Date(day.date).toLocaleDateString('fr-FR', { weekday: 'short' })}</span>
+                                    <span className="text-xs text-white/40">{formatEventDate(day.date, settings, { includeTime: false })}</span>
                                     <div className="mt-1 text-sm font-semibold text-white">{new Date(day.date).getDate()}</div>
                                 </div>
                                 <div
@@ -774,6 +774,7 @@ export default function CalendarView({ events, settings = {}, onAddEvent, onEdit
                     showNamedays={showNamedays}
                     onEditEvent={onEditEvent}
                     onDeleteEvent={onDeleteEvent}
+                    settings={settings}
                 />
             )}
         </div>

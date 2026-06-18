@@ -82,9 +82,15 @@ export function normalizeIcsSources(sources = []) {
       preset: Boolean(source.preset),
       needsUrl: Boolean(source.needsUrl),
       helpUrl: source.helpUrl || '',
+      defaultCategory: source.defaultCategory || 'perso',
+      defaultReminder: Boolean(source.defaultReminder),
     });
   }
-  return Array.from(byId.values());
+  return Array.from(byId.values()).map(source => ({
+    ...source,
+    defaultCategory: source.defaultCategory || 'perso',
+    defaultReminder: Boolean(source.defaultReminder),
+  }));
 }
 
 export function addIcsSource(sources, source) {

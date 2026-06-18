@@ -7,6 +7,7 @@ export const DEFAULT_CATEGORY_LEGEND = {
 };
 
 import { normalizeIcsSources } from './icsSources';
+import { normalizeAiUsageStats } from './aiUsage';
 
 export const DEFAULT_SETTINGS = {
   theme: 'dark',
@@ -27,6 +28,15 @@ export const DEFAULT_SETTINGS = {
   themes: [],
   activeThemeId: 'default',
   portableDataDir: '',
+  soundConfig: {
+    enabled: true,
+    volume: 0.7,
+    profile: 'calm',
+    bubble: null,
+    notification: null,
+    ringtone: null,
+  },
+  aiUsageStats: normalizeAiUsageStats(),
 };
 
 const CATEGORY_KEYWORDS = [
@@ -44,23 +54,32 @@ export function inferCategory(title = '', fallback = 'perso') {
 }
 
 export function normalizeSettings(settings = {}) {
+  const safeSettings = { ...settings };
+  delete safeSettings.aiApiKey;
+  delete safeSettings.aiModel;
+  delete safeSettings.customModels;
   const mergedLegend = {
     ...DEFAULT_CATEGORY_LEGEND,
-    ...(settings.categoryLegend || {}),
+    ...(safeSettings.categoryLegend || {}),
   };
 
   return {
     ...DEFAULT_SETTINGS,
-    ...settings,
+    ...safeSettings,
     categoryLegend: mergedLegend,
     shortcuts: {
       ...DEFAULT_SETTINGS.shortcuts,
-      ...(settings.shortcuts || {}),
+      ...(safeSettings.shortcuts || {}),
     },
-    calendarViews: settings.calendarViews || DEFAULT_SETTINGS.calendarViews,
-    routines: settings.routines || [],
-    icsSources: normalizeIcsSources(settings.icsSources || []),
-    themes: settings.themes || [],
+    calendarViews: safeSettings.calendarViews || DEFAULT_SETTINGS.calendarViews,
+    routines: safeSettings.routines || [],
+    icsSources: normalizeIcsSources(safeSettings.icsSources || []),
+    themes: safeSettings.themes || [],
+    aiUsageStats: normalizeAiUsageStats(safeSettings.aiUsageStats),
+    soundConfig: {
+      ...DEFAULT_SETTINGS.soundConfig,
+      ...(safeSettings.soundConfig || {}),
+    },
   };
 }
 

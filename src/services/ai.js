@@ -1,5 +1,25 @@
 import { fetch } from '@tauri-apps/plugin-http';
 
+export const OPENROUTER_FREE_MODEL_ID = 'openrouter/free';
+
+export function getOpenRouterApiKey() {
+    return import.meta.env.VITE_OPENROUTER_API_KEY?.trim() || '';
+}
+
+export function isAiConfigured() {
+    return Boolean(getOpenRouterApiKey());
+}
+
+function emitAiUsage(detail) {
+    if (typeof window === 'undefined' || !detail) return;
+    window.dispatchEvent(new CustomEvent('caltemp:ai-usage', {
+        detail: {
+            requestedAt: new Date().toISOString(),
+            ...detail,
+        },
+    }));
+}
+
 export async function searchWeb(query) {
     try {
         const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1`;
@@ -40,8 +60,9 @@ export async function searchWeb(query) {
     }
 }
 
-export async function generateText({ apiKey, model, messages, context, onChunk, signal, think = false }) {
-    if (!apiKey) throw new Error("Clé API manquante");
+export async function generateText({ messages, context, onChunk, signal, think = false }) {
+    const apiKey = getOpenRouterApiKey();
+    if (!apiKey) throw new Error("L'intégration IA n'est pas configurée dans ce build.");
 
     // Add context to system prompt if provided
     let finalMessages = [...messages];
@@ -65,12 +86,15 @@ export async function generateText({ apiKey, model, messages, context, onChunk, 
 
     try {
         const payload = {
-            model: model || 'mistralai/mistral-7b-instruct',
+            model: OPENROUTER_FREE_MODEL_ID,
             messages: finalMessages,
             temperature: think ? 0.9 : 0.7,
             max_tokens: 4000,
             stream: !!onChunk
         };
+        if (onChunk) {
+            payload.stream_options = { include_usage: true };
+        }
 
         const response = await window.fetch('https://openrouter.ai/api/v1/chat/completions', {
             method: 'POST',
@@ -89,19 +113,19 @@ export async function generateText({ apiKey, model, messages, context, onChunk, 
             try {
                 const errorData = await response.json();
                 errorMsg = errorData.error?.message || errorMsg;
-            } catch (e) {
+            } catch {
                 // Keep generic message if JSON parsing fails
             }
 
             // Map standard status codes to user-friendly messages
             switch (response.status) {
-                case 401: throw new Error("Clé API invalide. Veuillez vérifier vos paramètres.");
+                case 401: throw new Error("Clé OpenRouter invalide dans ce build.");
                 case 402: throw new Error("Crédits insuffisants sur OpenRouter.");
                 case 403: throw new Error("Accès refusé. Le contenu a peut-être été filtré ou votre limite est atteinte.");
-                case 404: throw new Error("Modèle non trouvé ou indisponible pour le moment.");
+                case 404: throw new Error("Free Models Router indisponible pour le moment.");
                 case 429: throw new Error("Limite de requêtes atteinte. Réessayez dans un instant.");
                 case 502: 
-                case 503: throw new Error("Le fournisseur du modèle est actuellement hors ligne. Essayez un autre modèle.");
+                case 503: throw new Error("Free Models Router est actuellement hors ligne. Réessayez dans un instant.");
                 default: throw new Error(errorMsg);
             }
         }
@@ -110,6 +134,11 @@ export async function generateText({ apiKey, model, messages, context, onChunk, 
         if (!onChunk) {
             const data = await response.json();
             if (data.error) throw new Error(data.error.message || "Erreur API inconnue");
+            emitAiUsage({
+                model: OPENROUTER_FREE_MODEL_ID,
+                actualModel: data.model || OPENROUTER_FREE_MODEL_ID,
+                usage: data.usage || null,
+            });
             return data.choices[0].message.content;
         }
 
@@ -119,6 +148,8 @@ export async function generateText({ apiKey, model, messages, context, onChunk, 
         let fullText = "";
         let isFirstChunk = true;
         let buffer = "";
+        let streamedUsage = null;
+        let streamedModel = OPENROUTER_FREE_MODEL_ID;
 
         while (true) {
             const { done, value } = await reader.read();
@@ -144,6 +175,9 @@ export async function generateText({ apiKey, model, messages, context, onChunk, 
                             throw new Error(json.error.message || "Erreur pendant le streaming");
                         }
 
+                        if (json.model) streamedModel = json.model;
+                        if (json.usage) streamedUsage = json.usage;
+
                         const choice = json.choices?.[0];
                         if (choice?.finish_reason === "error") {
                             throw new Error("Le flux a été interrompu par une erreur du fournisseur.");
@@ -164,6 +198,12 @@ export async function generateText({ apiKey, model, messages, context, onChunk, 
                 }
             }
         }
+
+        emitAiUsage({
+            model: OPENROUTER_FREE_MODEL_ID,
+            actualModel: streamedModel,
+            usage: streamedUsage,
+        });
 
         return fullText;
 

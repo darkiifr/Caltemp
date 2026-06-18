@@ -4,6 +4,7 @@ import {
   formatEventDate,
   getOccurrencesOnDate,
   normalizeEvent,
+  normalizeSettings,
 } from './events';
 
 describe('events domain', () => {
@@ -48,6 +49,43 @@ describe('events domain', () => {
 
     expect(value).toContain('16');
     expect(value).toMatch(/juin|Jun/i);
+  });
+
+  it('preserves a saved numeric date format while normalizing settings', () => {
+    const settings = normalizeSettings({ dateFormat: 'numeric' });
+
+    expect(settings.dateFormat).toBe('numeric');
+    expect(formatEventDate('2026-06-16T07:30:00.000Z', settings)).toMatch(/16\/06\/2026/);
+  });
+
+  it('drops legacy user-managed OpenRouter settings', () => {
+    const settings = normalizeSettings({
+      aiApiKey: 'sk-or-user-key',
+      aiModel: 'openai/gpt-4o-mini',
+      customModels: ['custom/model'],
+    });
+
+    expect(settings).not.toHaveProperty('aiApiKey');
+    expect(settings).not.toHaveProperty('aiModel');
+    expect(settings).not.toHaveProperty('customModels');
+  });
+
+  it('normalizes AI usage statistics in settings', () => {
+    const settings = normalizeSettings({
+      aiUsageStats: {
+        totalRequests: 1,
+        totalTokens: 25,
+        models: {
+          'openrouter/free': { requests: 1, totalTokens: 25 },
+        },
+      },
+    });
+
+    expect(settings.aiUsageStats.totalRequests).toBe(1);
+    expect(settings.aiUsageStats.models['openrouter/free']).toMatchObject({
+      requests: 1,
+      totalTokens: 25,
+    });
   });
 
   it('keeps custom categories from settings while normalizing events', () => {

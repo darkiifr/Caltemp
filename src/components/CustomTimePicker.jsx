@@ -44,7 +44,7 @@ export default function CustomTimePicker({ value, onChange }) {
             {/* Trigger Input */}
             <div
                 onClick={() => setIsOpen(!isOpen)}
-                className="w-full bg-white/5 border border-white/10 rounded-xl pl-10 pr-4 py-2.5 text-white cursor-pointer hover:bg-white/10 transition-colors flex items-center"
+                className="w-full min-h-11 bg-white/5 border border-white/10 rounded-xl pl-10 pr-4 py-2.5 text-white cursor-pointer hover:bg-white/10 transition-colors flex items-center"
             >
                 {value}
             </div>

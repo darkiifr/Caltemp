@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Clock, Calendar, Gift, AlertCircle } from 'lucide-react';
 import { getNameDay } from '../utils/namedays';
 import { playBubbleSound } from '../utils/sound';
+import { formatEventDate } from '../domain/events';
 
 function EventCountdown({ date }) {
     const [timeLeft, setTimeLeft] = useState('');
@@ -56,16 +57,11 @@ function EventCountdown({ date }) {
     );
 }
 
-export default function DayDetails({ date, events, holiday, showNamedays, onEditEvent, onDeleteEvent }) {
+export default function DayDetails({ date, events, holiday, showNamedays, onEditEvent, onDeleteEvent, settings = {} }) {
     const [contextMenu, setContextMenu] = useState(null);
     const nameDay = showNamedays ? getNameDay(date) : null;
 
-    const formattedDate = date.toLocaleDateString('fr-FR', {
-        weekday: 'long',
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric'
-    });
+    const formattedDate = formatEventDate(date, settings, { includeTime: false });
 
     // Sort events by time
     const sortedEvents = [...events].sort((a, b) => new Date(a.date) - new Date(b.date));

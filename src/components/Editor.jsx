@@ -1,9 +1,27 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Sparkles, Mic, MicOff, Image as ImageIcon, StopCircle, Trash2, MoveLeft, MoveRight, Copy, ClipboardPaste, Volume2, Check, X, Paperclip } from 'lucide-react';
-import { generateText } from '../services/ai';
+import { generateText, isAiConfigured } from '../services/ai';
 import AudioPlayer from './AudioPlayer';
 import { writeText, readImage, readText } from '@tauri-apps/plugin-clipboard-manager';
 // import { open } from '@tauri-apps/plugin-shell';
+
+export function insertDictationText(content = '', transcript = '', selectionStart = content.length, selectionEnd = selectionStart) {
+    const cleanTranscript = String(transcript || '').trim();
+    if (!cleanTranscript) return { content, cursor: selectionStart };
+
+    const start = Math.max(0, Math.min(Number(selectionStart) || 0, content.length));
+    const end = Math.max(start, Math.min(Number(selectionEnd) || start, content.length));
+    const before = content.slice(0, start);
+    const after = content.slice(end);
+    const prefix = before && !/[\s\n]$/.test(before) ? ' ' : '';
+    const suffix = after && !/^[\s\n.,;:!?]/.test(after) ? ' ' : '';
+    const inserted = `${prefix}${cleanTranscript}${suffix}`;
+
+    return {
+        content: `${before}${inserted}${after}`,
+        cursor: before.length + prefix.length + cleanTranscript.length,
+    };
+}
 
 export default function Editor({ note, onUpdateNote, settings }) {
     const [isGenerating, setIsGenerating] = useState(false);
@@ -65,9 +83,10 @@ export default function Editor({ note, onUpdateNote, settings }) {
                     const currentNote = noteRef.current;
                     if (!currentNote) return;
 
-                    const currentContent = currentNote.content || '';
-                    const separator = currentContent.length > 0 && !currentContent.endsWith(' ') && !currentContent.endsWith('\n') ? ' ' : '';
-                    const newContent = currentContent + separator + finalTranscript;
+                    const textarea = textareaRef.current;
+                    const selectionStart = textarea?.selectionStart ?? currentNote.content?.length ?? 0;
+                    const selectionEnd = textarea?.selectionEnd ?? selectionStart;
+                    const { content: newContent, cursor } = insertDictationText(currentNote.content || '', finalTranscript, selectionStart, selectionEnd);
                     
                     const updatedNote = { ...currentNote, content: newContent, updatedAt: Date.now() };
                     
@@ -75,6 +94,10 @@ export default function Editor({ note, onUpdateNote, settings }) {
                     noteRef.current = updatedNote;
                     onUpdateNote(updatedNote);
                     setInterimTranscript('');
+                    requestAnimationFrame(() => {
+                        textareaRef.current?.focus();
+                        textareaRef.current?.setSelectionRange(cursor, cursor);
+                    });
                 } else {
                     setInterimTranscript(interim);
                 }
@@ -138,12 +161,17 @@ export default function Editor({ note, onUpdateNote, settings }) {
         if (isListening) {
             isListeningRef.current = false;
             setIsListening(false);
-            recognitionRef.current.stop();
+            try {
+                recognitionRef.current.stop();
+            } catch (e) {
+                console.warn("Failed to stop speech recognition:", e);
+            }
         } else {
             isListeningRef.current = true;
-            setIsListening(true);
+            setInterimTranscript('');
             try {
                 recognitionRef.current.start();
+                setIsListening(true);
             } catch (e) {
                 console.error(e);
                 setIsListening(false);
@@ -196,7 +224,7 @@ export default function Editor({ note, onUpdateNote, settings }) {
 
     // Smart Auto-completion (Debounced)
     useEffect(() => {
-        if (!note?.content || !settings?.aiApiKey) return;
+        if (!note?.content || !isAiConfigured()) return;
 
         const timer = setTimeout(() => {
             // Only suggest if cursor is at the end and content is long enough
@@ -207,7 +235,7 @@ export default function Editor({ note, onUpdateNote, settings }) {
 
         return () => clearTimeout(timer);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [note?.content, settings?.aiApiKey]);
+    }, [note?.content]);
 
     if (!note) {
         return (
@@ -233,7 +261,7 @@ export default function Editor({ note, onUpdateNote, settings }) {
         setSuggestion(null); // Clear suggestion on type
 
         // Auto-completion logic (debounce could be added here)
-        if (settings?.aiApiKey && newContent.length > 10 && !isSuggesting && newContent.endsWith(' ')) {
+        if (isAiConfigured() && newContent.length > 10 && !isSuggesting && newContent.endsWith(' ')) {
             // Only trigger if user pauses or ends a sentence (simplified)
             // For a real implementation, use a debounce hook
             // This is a placeholder for where you'd call the AI for a short completion
@@ -475,8 +503,8 @@ export default function Editor({ note, onUpdateNote, settings }) {
     };
 
     const handleAiGenerate = async () => {
-        if (!settings?.aiApiKey) {
-            alert("Veuillez configurer votre clé API OpenRouter dans les paramètres.");
+        if (!isAiConfigured()) {
+            alert("L'intégration IA n'est pas configurée dans ce build.");
             return;
         }
 
@@ -494,8 +522,6 @@ export default function Editor({ note, onUpdateNote, settings }) {
             ];
 
             const generated = await generateText({
-                apiKey: settings.aiApiKey,
-                model: settings.aiModel,
                 messages: messages,
                 context: note.title
             });
@@ -513,7 +539,7 @@ export default function Editor({ note, onUpdateNote, settings }) {
 
     // Trigger suggestion manually (or could be hooked to debounce)
     const triggerSuggestion = async () => {
-        if (!settings?.aiApiKey || isSuggesting || !note.content) return;
+        if (!isAiConfigured() || isSuggesting || !note.content) return;
         
         setIsSuggesting(true);
         try {
@@ -524,8 +550,6 @@ export default function Editor({ note, onUpdateNote, settings }) {
             const messages = [{ role: "user", content: prompt }];
 
             const generated = await generateText({
-                apiKey: settings.aiApiKey,
-                model: settings.aiModel,
                 messages: messages,
                 context: note.title
             });
@@ -611,7 +635,7 @@ export default function Editor({ note, onUpdateNote, settings }) {
                         )}
 
                         {/* AI Generation */}
-                        {(settings?.aiEnabled !== false && settings?.aiApiKey) && (
+                        {(settings?.aiEnabled !== false && isAiConfigured()) && (
                             <button
                                 onClick={handleAiGenerate}
                                 disabled={isGenerating}
