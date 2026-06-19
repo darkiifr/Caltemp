@@ -12,6 +12,7 @@ import { ChevronDown, ChevronUp, Brain } from 'lucide-react';
 import { handleLocalDexterCommand } from '../domain/dexterLocal';
 import { parseDexterAction, removeDexterActionJson, sanitizeDexterReply } from '../domain/dexterActions';
 import { getNextOccurrence } from '../domain/events';
+import { normalizeUnclearDexterReply, shouldUseLocalDexterCommand } from '../domain/dexterRouting';
 
 const DEXTER_HISTORY_STORAGE_KEY = 'caltemp.dexter.conversations.v1';
 
@@ -118,23 +119,26 @@ const ThoughtBlock = React.memo(({ content }) => {
 ThoughtBlock.displayName = "ThoughtBlock";
 
 const MessageItem = React.memo(({ msg }) => {
+    const isUser = msg.role === 'user';
+
     return (
         <motion.div 
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.2 }}
-            className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} group mb-6`}
+            className={`flex ${isUser ? 'justify-end' : 'justify-start'} group mb-5`}
         >
-            <div className={`max-w-[85%] lg:max-w-[75%] px-5 py-4 rounded-2xl relative ${
-                msg.role === 'user' 
-                ? 'bg-blue-600 text-white rounded-br-sm' 
-                : 'bg-white/5 border border-white/5 text-white rounded-bl-sm'
-            }`}>
-                <div className="prose prose-invert max-w-none prose-p:leading-relaxed prose-pre:p-0">
-                    {msg.role === 'user' ? (
+            <div className={`flex max-w-[92%] ${isUser ? 'flex-row-reverse lg:max-w-[72%]' : 'w-full lg:max-w-[82%]'}`}>
+                <div className={`relative min-w-0 px-4 py-3 text-[15px] leading-7 ${
+                    isUser
+                        ? 'rounded-[22px] bg-[#2f2f2f] text-white shadow-[0_8px_28px_rgba(0,0,0,0.22)]'
+                        : 'text-white'
+                }`}>
+                <div className="prose prose-invert max-w-none prose-p:leading-7 prose-pre:p-0 prose-p:mb-3 prose-p:last:mb-0">
+                    {isUser ? (
                         <div className="flex items-center gap-3">
                             <div className="flex-1">
-                                <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{msg.content}</p>
+                                <p className="whitespace-pre-wrap">{msg.content}</p>
                             </div>
                         </div>
                     ) : (
@@ -148,7 +152,7 @@ const MessageItem = React.memo(({ msg }) => {
                                 <ReactMarkdown 
                                     remarkPlugins={[remarkGfm]}
                                     components={{
-                                        p: ({children}) => <p className="mb-4 last:mb-0 leading-relaxed text-[15px]">{children}</p>,
+                                        p: ({children}) => <p className="mb-3 last:mb-0 leading-7 text-[15px] text-white/92">{children}</p>,
                                         strong: ({children}) => <strong className="text-white font-bold">{children}</strong>,
                                         ul: ({children}) => <ul className="list-disc pl-5 mb-4 space-y-2">{children}</ul>,
                                         ol: ({children}) => <ol className="list-decimal pl-5 mb-4 space-y-2">{children}</ol>,
@@ -191,9 +195,6 @@ const MessageItem = React.memo(({ msg }) => {
                         ))}
                     </div>
                 )}
-                
-                <div className={`absolute bottom-[-20px] ${msg.role === 'user' ? 'right-2' : 'left-2'} opacity-0 group-hover:opacity-100 transition-opacity`}>
-                    <span className="text-[10px] text-white/20 font-medium">Envoyé</span>
                 </div>
             </div>
         </motion.div>
@@ -346,7 +347,7 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent, onO
         });
     }, [activeConversationId]);
 
-    const handleSend = async (inputValue, files = []) => {
+    const handleSend = async (inputValue, files = [], options = {}) => {
         if (!inputValue.trim() && files.length === 0) return;
 
         // Cancel any existing request
@@ -382,12 +383,22 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent, onO
         setIsTyping(true);
         if (isSearch) setIsSearching(true);
 
-        const localCommand = handleLocalDexterCommand(cleanValue, {
-            events: eventsRef.current,
-            settings,
-            now: new Date(),
-            referencedEventId: referencedEventIdRef.current,
+        const aiAvailable = settings?.aiEnabled !== false && isAiConfigured();
+        const useLocalCommand = shouldUseLocalDexterCommand({
+            source: options.source || 'typed',
+            aiEnabled: settings?.aiEnabled !== false,
+            aiConfigured: aiAvailable,
         });
+
+        const localCommand = useLocalCommand
+            ? handleLocalDexterCommand(cleanValue, {
+                events: eventsRef.current,
+                settings,
+                now: new Date(),
+                referencedEventId: referencedEventIdRef.current,
+            })
+            : { handled: false };
+
         if (localCommand.handled) {
             if (localCommand.type === 'create-event' && localCommand.event) {
                 const updatedEvents = await onAddEvent(localCommand.event);
@@ -639,6 +650,10 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent, onO
                     .replace(/^\{"query":.*?\}\s*/g, '')
                     .trim();
                 cleanResponse = sanitizeDexterReply(cleanResponse, settings);
+                cleanResponse = normalizeUnclearDexterReply({
+                    userText: cleanValue,
+                    assistantText: cleanResponse,
+                });
                     
                 if (!cleanResponse && hadActionJson && !actionResult.ok) {
                     cleanResponse = `Je n’ai pas pu exécuter l’action demandée : ${actionResult.error}`;
@@ -781,7 +796,7 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent, onO
                                         <button
                                             key={prompt}
                                             type="button"
-                                            onClick={() => handleSend(prompt)}
+                                            onClick={() => handleSend(prompt, [], { source: 'quick-prompt' })}
                                             className="rounded-lg border border-white/10 bg-white/[0.04] px-4 py-3 text-left text-sm text-white/75 transition-colors hover:bg-white/[0.08] hover:text-white"
                                         >
                                             {prompt}
