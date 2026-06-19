@@ -1,27 +1,83 @@
 import { buildExamRevisionPlan, buildWeeklySummary } from './planning';
 import { DEFAULT_CATEGORY_LEGEND, getNextOccurrence, inferCategory, normalizeEvent } from './events';
 
-function nextDateForWord(word, now) {
+const FRENCH_MONTHS = ['janvier', 'février', 'fevrier', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'aout', 'septembre', 'octobre', 'novembre', 'décembre', 'decembre'];
+const FRENCH_DAYS = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
+
+function parseFrenchDate(input, now) {
   const date = new Date(now);
-  if (word === 'demain') date.setDate(date.getDate() + 1);
-  if (word === "aujourd'hui" || word === 'aujourdhui') return date;
-  return date;
+  const normalized = input.toLocaleLowerCase('fr-FR');
+  let dateSet = false;
+
+  const exactMatch = normalized.match(/\ble\s+(\d{1,2})(?:er)?(?:\s+(janvier|février|fevrier|mars|avril|mai|juin|juillet|août|aout|septembre|octobre|novembre|décembre|decembre))?\b/i);
+  if (exactMatch) {
+    const day = parseInt(exactMatch[1], 10);
+    date.setDate(day);
+    if (exactMatch[2]) {
+      let monthWord = exactMatch[2];
+      let monthIndex = FRENCH_MONTHS.indexOf(monthWord);
+      if (monthWord === 'fevrier') monthIndex = 1;
+      if (monthWord === 'aout') monthIndex = 7;
+      if (monthWord === 'decembre') monthIndex = 11;
+      date.setMonth(monthIndex);
+      if (date < now && date.getMonth() !== now.getMonth()) {
+        date.setFullYear(now.getFullYear() + 1);
+      }
+    } else {
+      if (date < now && day < now.getDate()) {
+        date.setMonth(date.getMonth() + 1);
+      }
+    }
+    dateSet = true;
+  } else if (normalized.match(/\b(après-demain|apres-demain|apres demain|après demain)\b/)) {
+    date.setDate(date.getDate() + 2);
+    dateSet = true;
+  } else if (normalized.includes('demain')) {
+    date.setDate(date.getDate() + 1);
+    dateSet = true;
+  } else if (normalized.includes("aujourd'hui") || normalized.includes('aujourdhui')) {
+    dateSet = true;
+  } else if (normalized.includes('la semaine prochaine')) {
+    date.setDate(date.getDate() + 7);
+    dateSet = true;
+  } else {
+    for (let i = 0; i < FRENCH_DAYS.length; i++) {
+      if (normalized.includes(FRENCH_DAYS[i])) {
+        let diff = i - date.getDay();
+        if (diff <= 0) diff += 7;
+        date.setDate(date.getDate() + diff);
+        dateSet = true;
+        break;
+      }
+    }
+  }
+
+  return { date, dateSet };
 }
 
 function parseTime(input) {
-  const match = input.match(/(?:^|\s)(?:à|a)\s*(\d{1,2})(?:h|:)?(\d{2})?\b/i);
-  if (!match) return { hours: 9, minutes: 0 };
-  return {
-    hours: Number(match[1]),
-    minutes: Number(match[2] || 0),
-  };
+  const normalized = input.toLocaleLowerCase('fr-FR');
+  const match = normalized.match(/(?:^|\s)(?:à|a|vers)\s*(\d{1,2})(?:h|:)?(\d{2})?\b/i);
+  if (match) {
+    return { hours: Number(match[1]), minutes: Number(match[2] || 0), timeSet: true };
+  }
+  if (normalized.includes('midi')) {
+    return { hours: 12, minutes: 0, timeSet: true };
+  }
+  if (normalized.includes('minuit')) {
+    return { hours: 0, minutes: 0, timeSet: true };
+  }
+  return { hours: 9, minutes: 0, timeSet: false };
 }
 
 function titleFromCommand(input) {
   return input
-    .replace(/^(ajoute|crée|cree|planifie|rappelle-moi|rappelle moi)\s+/i, '')
-    .replace(/\b(demain|aujourd'hui|aujourdhui)\b/ig, '')
-    .replace(/(?:à|a)\s*\d{1,2}(?:h|:)?\d{0,2}/ig, '')
+    .replace(/^(ajoute|ajouter|crée|cree|créer|creer|planifie|planifier|rappelle-moi|rappelle moi|rappeler)\s+/i, '')
+    .replace(/\b(après-demain|apres-demain|apres demain|après demain|demain|aujourd'hui|aujourdhui|la semaine prochaine)\b/ig, '')
+    .replace(/\ble\s+\d{1,2}(?:er)?(?:\s+(?:janvier|février|fevrier|mars|avril|mai|juin|juillet|août|aout|septembre|octobre|novembre|décembre|decembre))?\b/ig, '')
+    .replace(/\b(dimanche|lundi|mardi|mercredi|jeudi|vendredi|samedi)\b/ig, '')
+    .replace(/(?:à|a|vers)\s*\d{1,2}(?:h|:)?\d{0,2}/ig, '')
+    .replace(/\b(midi|minuit)\b/ig, '')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -142,22 +198,20 @@ function parseReminderEdit(normalized) {
 }
 
 function parseDateEdit(input, currentDate, now) {
-  const normalized = input.toLocaleLowerCase('fr-FR');
-  const date = new Date(currentDate);
-  if (normalized.includes('demain')) {
-    date.setFullYear(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-  } else if (normalized.includes("aujourd'hui") || normalized.includes('aujourdhui')) {
-    date.setFullYear(now.getFullYear(), now.getMonth(), now.getDate());
+  const { date: parsedDate, dateSet } = parseFrenchDate(input, now);
+  const { hours, minutes, timeSet } = parseTime(input);
+  
+  if (!dateSet && !timeSet) return null;
+
+  const finalDate = new Date(currentDate);
+  if (dateSet) {
+    finalDate.setFullYear(parsedDate.getFullYear(), parsedDate.getMonth(), parsedDate.getDate());
+  }
+  if (timeSet) {
+    finalDate.setHours(hours, minutes, 0, 0);
   }
 
-  const time = input.match(/(?:^|\s)(?:à|a)\s*(\d{1,2})(?:h|:)?(\d{2})?\b/i);
-  if (time) {
-    date.setHours(Number(time[1]), Number(time[2] || 0), 0, 0);
-  }
-
-  return (normalized.includes('demain') || normalized.includes("aujourd'hui") || normalized.includes('aujourdhui') || time)
-    ? date
-    : null;
+  return finalDate;
 }
 
 function buildUpdatedEventFromCommand(input, match, categoryLegend, now) {
@@ -182,11 +236,23 @@ function buildUpdatedEventFromCommand(input, match, categoryLegend, now) {
 }
 
 export function parseFrenchEventCommand(input, now = new Date()) {
-  if (!/^(ajoute|crée|cree|planifie|rappelle-moi|rappelle moi)\b/i.test(input.trim())) return null;
-  const dayWord = input.toLocaleLowerCase('fr-FR').includes('demain') ? 'demain' : 'aujourd’hui';
+  if (!/^(ajoute|ajouter|crée|cree|créer|creer|planifie|planifier|rappelle-moi|rappelle moi|rappeler)\b/i.test(input.trim())) return null;
+  
+  // Bypass local engine if the user asks a question, gives a long description, or explicitly mentions AI/Dexter
+  if (input.includes('?') || input.split(' ').length > 15 || /\b(ia|intelligence artificielle|dexter|comment|idées|aide)\b/i.test(input)) {
+      return null;
+  }
+  
+  const { date, dateSet } = parseFrenchDate(input, now);
   const { hours, minutes } = parseTime(input);
-  const date = nextDateForWord(dayWord.replace('’', "'"), now);
+  
+  // Si la date est encore trop complexe pour le parseur (ex: "dans 3 jours", "le mois prochain") on passe à l'IA
+  if (!dateSet && /\b(dans \d+|prochain|dernier|année|mois)\b/i.test(input)) {
+      return null;
+  }
+  
   date.setHours(hours, minutes, 0, 0);
+  
   const rawTitle = titleFromCommand(input) || 'Nouvel événement';
   const title = rawTitle.charAt(0).toLocaleUpperCase('fr-FR') + rawTitle.slice(1);
 

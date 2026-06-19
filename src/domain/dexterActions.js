@@ -1,4 +1,4 @@
-const SUPPORTED_ACTIONS = new Set(['create_event', 'update_event']);
+const SUPPORTED_ACTIONS = new Set(['create_event', 'update_event', 'search_web']);
 
 function extractJsonCandidates(text = '') {
   const candidates = [];
@@ -34,6 +34,12 @@ function validateUpdateEvent(data) {
   return null;
 }
 
+function validateSearchWeb(data) {
+  if (!data || typeof data !== 'object') return 'Données de recherche invalides.';
+  if (typeof data.query !== 'string' || !data.query.trim()) return 'Requête de recherche manquante.';
+  return null;
+}
+
 export function parseDexterAction(text = '') {
   const candidates = extractJsonCandidates(text);
   if (candidates.length === 0) {
@@ -50,9 +56,11 @@ export function parseDexterAction(text = '') {
       }
 
       const data = parsed.data || parsed;
-      const validationError = action === 'create_event'
-        ? validateCreateEvent(data)
-        : validateUpdateEvent(data);
+      let validationError = null;
+      if (action === 'create_event') validationError = validateCreateEvent(data);
+      else if (action === 'update_event') validationError = validateUpdateEvent(data);
+      else if (action === 'search_web') validationError = validateSearchWeb(data);
+
       if (validationError) return { ok: false, error: validationError };
 
       return { ok: true, action, data };
@@ -70,7 +78,7 @@ export function parseDexterAction(text = '') {
 export function removeDexterActionJson(text = '') {
   return text
     .replace(/```json\s*[\s\S]*?\s*```/gi, '')
-    .replace(/\{[\s\S]*"action"\s*:\s*"(create_event|update_event)"[\s\S]*\}/gi, '')
+    .replace(/\{[\s\S]*"action"\s*:\s*"(create_event|update_event|search_web)"[\s\S]*\}/gi, '')
     .trim();
 }
 
@@ -84,7 +92,7 @@ export function sanitizeDexterReply(text = '', settings = {}) {
   );
 
   const withoutActions = removeDexterActionJson(text)
-    .replace(/\b(create_event|update_event|input_audio|d_update)\b/gi, '')
+    .replace(/\b(create_event|update_event|search_web|input_audio|d_update)\b/gi, '')
     .replace(/#[0-9a-f]{6}\b/gi, '')
     .replace(/\bJSON\b/gi, '')
     .replace(/"?\b(action|data|reminder|category|color|tags|durationMinutes)\b"?\s*:?\s*(true|false)?/gi, '')

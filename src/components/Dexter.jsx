@@ -353,11 +353,23 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent, onO
         if (abortControllerRef.current) handleAbort();
         abortControllerRef.current = new AbortController();
 
-        const isSearch = inputValue.startsWith('[Search: ');
+        let isSearch = inputValue.startsWith('[Search: ');
         const isThink = inputValue.startsWith('[Think: ');
         const isCanvas = inputValue.startsWith('[Canvas: ');
 
         const cleanValue = inputValue.replace(/^\[(Search|Think|Canvas): (.*)\]$/, '$2');
+
+        // Detect if web search should be automatically triggered based on intent
+        if (!isSearch) {
+            const normalized = cleanValue.trim().toLocaleLowerCase('fr-FR');
+            if (
+                /\b(cherche|recherche|trouve)\b.*\b(internet|web|net|ligne|google)\b/i.test(normalized) ||
+                /\b(météo|actualité|actualités|news|infos|recette|définition|traduis)\b/i.test(normalized) ||
+                /^(qui est|c'est quoi|qu'est-ce que|qu'est ce que|comment faire|pourquoi)\b/i.test(normalized)
+            ) {
+                isSearch = true;
+            }
+        }
 
         const userMsg = { 
             id: Date.now(), 
@@ -456,7 +468,7 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent, onO
 
                 const systemPrompt = {
                     role: "system",
-                    content: `${systemInstruction}\n\nDIRECTIVES IMPORTANTES:\n1. Si l'utilisateur demande une information déjà présente dans les rappels à venir ci-dessus, réponds avec ces données locales et ne dis jamais que tu n'as pas accès au calendrier.\n2. Pour créer ou modifier un rappel, fournis une action machine JSON minimale si nécessaire, mais n'explique jamais les champs techniques à l'utilisateur.\n3. Ne montre pas de noms de fonctions, clés internes, couleurs hexadécimales, identifiants ou JSON dans le texte visible.\n4. Après une création ou modification, le texte visible doit être un résumé naturel avec titre, date et statut d'alerte.\n5. N'invente pas d'action dangereuse : imports, exports, suppressions larges et grands changements de paramètres doivent ouvrir ou expliquer le flux UI de confirmation.\n6. Tu peux répondre sur catégories, légendes, alertes, routines, imports ICS, statistiques et notes en Markdown clair.`
+                    content: `${systemInstruction}\n\nDIRECTIVES IMPORTANTES:\n1. Si l'utilisateur demande une information déjà présente dans les rappels à venir ci-dessus, réponds avec ces données locales et ne dis jamais que tu n'as pas accès au calendrier.\n2. Pour créer un rappel, tu DOIS ABSOLUMENT inclure un bloc \`\`\`json avec cette structure exacte : {"action": "create_event", "data": {"title": "Titre", "date": "2026-06-06T12:00:00Z", "reminder": true}}.\n3. Pour modifier un rappel, tu DOIS inclure : {"action": "update_event", "data": {"id": "ID_ici", "title": "Nouveau", "date": "2026-06-06T12:00:00Z"}}.\n4. Si la demande de l'utilisateur nécessite de chercher des informations actualisées ou générales sur internet (météo, actualités, connaissances), tu PEUX et DOIS inclure : {"action": "search_web", "data": {"query": "mots clés de recherche courts"}}. Tu recevras ensuite les résultats dans un nouveau message pour formuler ta réponse finale.\n5. N'explique jamais les champs techniques à l'utilisateur, et ne montre pas de clés internes ou JSON dans le texte visible.\n6. Après une création ou modification, le texte visible doit être un résumé naturel avec titre, date et statut d'alerte.\n7. N'invente pas d'action dangereuse.`
                 };
 
                 // --- SEARCH PHASE ---
@@ -475,46 +487,84 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent, onO
 
                 aiMessages = [systemPrompt, ...history, { role: 'user', content: userContent.length > 1 ? userContent : userMsg.content }];
 
-                // --- FINAL RESPONSE (STREAMING) ---
-                const assistantMsgId = Date.now() + 2;
-                // Add the empty assistant message immediately
-                setMessages(prev => [...prev, { id: assistantMsgId, role: 'assistant', content: '', isStreaming: true }]);
-                
-                const response = await generateText({
-                    messages: aiMessages,
-                    context: searchContext,
-                    think: isThink,
-                    signal: abortControllerRef.current?.signal,
-                    onChunk: (fullText, chunk, isFirstChunk) => {
-                        if (isFirstChunk) {
-                            setIsTyping(false);
-                            setIsSearching(false);
-                        }
-                        
-                        let displayContent = fullText;
-                        
-                        // Hide create_event JSON
-                        if (displayContent.includes('```json') || displayContent.includes('"action": "create_event"')) {
-                            displayContent = "⏳ Création de l'événement en cours...";
-                        }
-                        
-                        // Hide leaked search tool JSON
-                        displayContent = displayContent.replace(/Search web\.\{.*?\}/g, '');
-                        displayContent = displayContent.replace(/^\{"query":.*?"source":.*?"\}\s*/g, '');
-                        displayContent = displayContent.replace(/^\{"query":.*?\}\s*/g, '');
-                        displayContent = sanitizeDexterReply(displayContent, settings) || displayContent;
+                let currentIteration = 0;
+                const MAX_ITERATIONS = 3;
+                let finalResponse = "";
+                let actionResult = null;
+                let hadActionJson = false;
+                let assistantMsgId = Date.now() + 2;
 
+                // Loop for handling multi-step AI actions like search_web
+                while (currentIteration < MAX_ITERATIONS) {
+                    currentIteration++;
+                    let iterationResponse = "";
+                    
+                    // --- FINAL RESPONSE (STREAMING) ---
+                    assistantMsgId = Date.now() + 2 + currentIteration;
+                    // Add the empty assistant message immediately
+                    setMessages(prev => [...prev, { id: assistantMsgId, role: 'assistant', content: '', isStreaming: true }]);
+                    
+                    await generateText({
+                        messages: aiMessages,
+                        context: searchContext,
+                        think: isThink,
+                        signal: abortControllerRef.current?.signal,
+                        onChunk: (fullText, chunk, isFirstChunk) => {
+                            if (isFirstChunk) {
+                                setIsTyping(false);
+                                setIsSearching(false);
+                            }
+                            iterationResponse = fullText;
+                            
+                            let displayContent = fullText;
+                            
+                            // Hide create_event JSON
+                            if (displayContent.includes('```json') || displayContent.includes('"action": "create_event"')) {
+                                displayContent = "⏳ Création de l'événement en cours...";
+                            }
+                            
+                            if (displayContent.includes('"action": "search_web"')) {
+                                displayContent = "⏳ Recherche sur le web en cours...";
+                            }
+                            
+                            // Hide leaked search tool JSON
+                            displayContent = displayContent.replace(/Search web\.\{.*?\}/g, '');
+                            displayContent = displayContent.replace(/^\{"query":.*?"source":.*?"\}\s*/g, '');
+                            displayContent = displayContent.replace(/^\{"query":.*?\}\s*/g, '');
+                            displayContent = sanitizeDexterReply(displayContent, settings) || displayContent;
+
+                            setMessages(prev => prev.map(msg => 
+                                msg.id === assistantMsgId ? { ...msg, content: displayContent, isStreaming: true } : msg
+                            ));
+                        }
+                    });
+
+                    actionResult = parseDexterAction(iterationResponse);
+                    hadActionJson = iterationResponse.includes('"action"') || iterationResponse.includes('```json');
+                    finalResponse = iterationResponse;
+
+                    // AI decided to search the web during the stream
+                    if (actionResult.ok && actionResult.action === 'search_web') {
+                        setIsSearching(true);
                         setMessages(prev => prev.map(msg => 
-                            msg.id === assistantMsgId ? { ...msg, content: displayContent, isStreaming: true } : msg
+                            msg.id === assistantMsgId ? { ...msg, content: "🔍 Recherche sur le web en cours...", isStreaming: false } : msg
                         ));
+
+                        const query = actionResult.data.query;
+                        const searchResults = await searchWeb(query);
+                        const resultsText = searchResults ? searchResults.map(r => `[Source: ${r.title}] ${r.snippet}`).join('\n') : "Aucun résultat trouvé.";
+                        
+                        // Append AI's intent and the search results to messages
+                        aiMessages.push({ role: 'assistant', content: iterationResponse });
+                        aiMessages.push({ role: 'user', content: `Résultats de la recherche pour "${query}":\n${resultsText}\n\nFormule ta réponse finale à partir de ces informations.` });
+                        searchContext = ""; // Clear context to avoid duplication
+                        
+                        continue;
                     }
-                });
 
-
-
-
-                const actionResult = parseDexterAction(response);
-                const hadActionJson = response.includes('"action"') || response.includes('```json');
+                    // No further actions required by AI loop, break
+                    break;
+                }
 
                 if (actionResult.ok && actionResult.action === 'create_event') {
                     const finalEvent = {
@@ -583,7 +633,7 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent, onO
                 }
 
                 // If not an event, display cleaned response
-                let cleanResponse = removeDexterActionJson(response)
+                let cleanResponse = removeDexterActionJson(finalResponse)
                     .replace(/Search web\.\{.*?\}/g, '')
                     .replace(/^\{"query":.*?"source":.*?"\}\s*/g, '')
                     .replace(/^\{"query":.*?\}\s*/g, '')
@@ -596,15 +646,23 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent, onO
                     cleanResponse = "Opération terminée.";
                 }
 
-                setMessages(prev => prev.map(msg => 
-                    msg.id === assistantMsgId ? { ...msg, content: cleanResponse, isStreaming: false } : msg
-                ));
+                // Make sure we update the correct assistantMsgId
+                setMessages(prev => {
+                    // Update the last message or create a new one if somehow lost
+                    const msgExists = prev.some(m => m.id === assistantMsgId);
+                    if (msgExists) {
+                        return prev.map(msg => 
+                            msg.id === assistantMsgId ? { ...msg, content: cleanResponse, isStreaming: false } : msg
+                        );
+                    }
+                    return [...prev, { id: assistantMsgId, role: 'assistant', content: cleanResponse, isStreaming: false }];
+                });
 
                 if (isSearch) setIsSearching(false);
 
                 // Move to Canvas if response is long or contains complex content
-                if (isCanvas || response.length > 1500 || (response.match(/```/g) || []).length >= 2) {
-                    setCanvasContent(response);
+                if (isCanvas || finalResponse.length > 1500 || (finalResponse.match(/```/g) || []).length >= 2) {
+                    setCanvasContent(finalResponse);
                 }
 
             } catch (error) {
