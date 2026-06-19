@@ -2,6 +2,13 @@ import { fetch } from '@tauri-apps/plugin-http';
 
 export const OPENROUTER_FREE_MODEL_ID = 'openrouter/free';
 
+export const FALLBACK_FREE_MODELS = [
+    'meta-llama/llama-3-8b-instruct:free',
+    'qwen/qwen-2.5-72b-instruct:free',
+    'google/gemma-2-9b-it:free',
+    'openai/gpt-oss-120b:free'
+];
+
 export function getOpenRouterApiKey() {
     return import.meta.env.VITE_OPENROUTER_API_KEY?.trim() || '';
 }
@@ -60,7 +67,7 @@ export async function searchWeb(query) {
     }
 }
 
-export async function generateText({ messages, context, onChunk, signal, think = false }) {
+async function executeGenerateText({ modelId, messages, context, onChunk, signal, think = false }) {
     const apiKey = getOpenRouterApiKey();
     if (!apiKey) throw new Error("L'intégration IA n'est pas configurée dans ce build.");
 
@@ -84,80 +91,113 @@ export async function generateText({ messages, context, onChunk, signal, think =
         finalMessages.unshift({ role: 'system', content: systemContent });
     }
 
-    try {
-        const payload = {
-            model: OPENROUTER_FREE_MODEL_ID,
-            messages: finalMessages,
-            temperature: think ? 0.9 : 0.7,
-            max_tokens: 4000,
-            stream: !!onChunk
+    // Wrap onChunk to detect and throw on safety verdicts
+    let wrappedOnChunk = onChunk;
+    let released = false;
+    
+    if (onChunk) {
+        wrappedOnChunk = (fullText, chunk, isFirstChunk) => {
+            if (released) {
+                onChunk(fullText, chunk, isFirstChunk);
+                return;
+            }
+            
+            // Check if the output is starting to look like a content safety verdict
+            const lowerText = fullText.toLowerCase().trim();
+            if ("user safety: safe".startsWith(lowerText) || "user safety: unsafe".startsWith(lowerText)) {
+                // Keep buffering to see if it is a safety verdict
+                if (/^user safety:/i.test(lowerText)) {
+                    throw new Error("SafetyVerdictError");
+                }
+                return;
+            }
+            
+            // Not a safety verdict, release the buffered text
+            released = true;
+            onChunk(fullText, fullText, true);
         };
-        if (onChunk) {
-            payload.stream_options = { include_usage: true };
+    }
+
+    const payload = {
+        model: modelId,
+        messages: finalMessages,
+        temperature: think ? 0.9 : 0.7,
+        max_tokens: 4000,
+        stream: !!onChunk
+    };
+    if (onChunk) {
+        payload.stream_options = { include_usage: true };
+    }
+
+    const response = await window.fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': 'https://caltemp.app',
+            'X-Title': 'Caltemp'
+        },
+        body: JSON.stringify(payload),
+        signal
+    });
+
+    if (!response.ok) {
+        let errorMsg = `Erreur ${response.status}`;
+        try {
+            const errorData = await response.json();
+            errorMsg = errorData.error?.message || errorMsg;
+        } catch {
+            // Keep generic message if JSON parsing fails
         }
 
-        const response = await window.fetch('https://openrouter.ai/api/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${apiKey}`,
-                'Content-Type': 'application/json',
-                'HTTP-Referer': 'https://caltemp.app',
-                'X-Title': 'Caltemp'
-            },
-            body: JSON.stringify(payload),
-            signal
+        // Map standard status codes to user-friendly messages
+        switch (response.status) {
+            case 401: throw new Error("Clé OpenRouter invalide dans ce build.");
+            case 402: throw new Error("Crédits insuffisants sur OpenRouter.");
+            case 403: throw new Error("Accès refusé. Le contenu a peut-être été filtré ou votre limite est atteinte.");
+            case 404: throw new Error("Free Models Router indisponible pour le moment.");
+            case 429: throw new Error("Limite de requêtes atteinte. Réessayez dans un instant.");
+            case 502: 
+            case 503: throw new Error("Free Models Router est actuellement hors ligne. Réessayez dans un instant.");
+            default: throw new Error(errorMsg);
+        }
+    }
+
+    // --- NON-STREAMING MODE ---
+    if (!onChunk) {
+        const data = await response.json();
+        if (data.error) throw new Error(data.error.message || "Erreur API inconnue");
+        const content = data.choices[0].message.content;
+        
+        if (/^User Safety:/i.test(content.trim())) {
+            throw new Error("SafetyVerdictError");
+        }
+        
+        emitAiUsage({
+            model: modelId,
+            actualModel: data.model || modelId,
+            usage: data.usage || null,
         });
+        return content;
+    }
 
-        if (!response.ok) {
-            let errorMsg = `Erreur ${response.status}`;
-            try {
-                const errorData = await response.json();
-                errorMsg = errorData.error?.message || errorMsg;
-            } catch {
-                // Keep generic message if JSON parsing fails
-            }
+    // --- STREAMING MODE ---
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let fullText = "";
+    let isFirstChunk = true;
+    let streamBuffer = "";
+    let streamedUsage = null;
+    let streamedModel = modelId;
 
-            // Map standard status codes to user-friendly messages
-            switch (response.status) {
-                case 401: throw new Error("Clé OpenRouter invalide dans ce build.");
-                case 402: throw new Error("Crédits insuffisants sur OpenRouter.");
-                case 403: throw new Error("Accès refusé. Le contenu a peut-être été filtré ou votre limite est atteinte.");
-                case 404: throw new Error("Free Models Router indisponible pour le moment.");
-                case 429: throw new Error("Limite de requêtes atteinte. Réessayez dans un instant.");
-                case 502: 
-                case 503: throw new Error("Free Models Router est actuellement hors ligne. Réessayez dans un instant.");
-                default: throw new Error(errorMsg);
-            }
-        }
-
-        // --- NON-STREAMING MODE ---
-        if (!onChunk) {
-            const data = await response.json();
-            if (data.error) throw new Error(data.error.message || "Erreur API inconnue");
-            emitAiUsage({
-                model: OPENROUTER_FREE_MODEL_ID,
-                actualModel: data.model || OPENROUTER_FREE_MODEL_ID,
-                usage: data.usage || null,
-            });
-            return data.choices[0].message.content;
-        }
-
-        // --- STREAMING MODE ---
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let fullText = "";
-        let isFirstChunk = true;
-        let buffer = "";
-        let streamedUsage = null;
-        let streamedModel = OPENROUTER_FREE_MODEL_ID;
-
+    try {
         while (true) {
             const { done, value } = await reader.read();
             if (done) break;
 
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || ""; // Keep the incomplete line in the buffer
+            streamBuffer += decoder.decode(value, { stream: true });
+            const lines = streamBuffer.split('\n');
+            streamBuffer = lines.pop() || ""; // Keep the incomplete line in the buffer
 
             for (const line of lines) {
                 const trimmedLine = line.trim();
@@ -186,10 +226,11 @@ export async function generateText({ messages, context, onChunk, signal, think =
                         const content = choice?.delta?.content || "";
                         if (content || isFirstChunk) {
                             fullText += content;
-                            onChunk(fullText, content, isFirstChunk);
+                            wrappedOnChunk(fullText, content, isFirstChunk);
                             isFirstChunk = false;
                         }
                     } catch (e) {
+                        if (e.message === "SafetyVerdictError") throw e;
                         // Re-throw if it's our custom Error, otherwise ignore (partial chunks)
                         if (e instanceof Error && e.message !== "Unexpected end of JSON input" && !e.message.includes("JSON")) {
                             throw e;
@@ -198,20 +239,58 @@ export async function generateText({ messages, context, onChunk, signal, think =
                 }
             }
         }
-
-        emitAiUsage({
-            model: OPENROUTER_FREE_MODEL_ID,
-            actualModel: streamedModel,
-            usage: streamedUsage,
-        });
-
-        return fullText;
-
-    } catch (error) {
-        if (error.name === 'AbortError') {
-            throw error;
-        }
-        console.error("AI Service Error:", error);
-        throw error;
+    } catch (e) {
+        if (e.message === "SafetyVerdictError") throw e;
+        throw e;
     }
+
+    emitAiUsage({
+        model: modelId,
+        actualModel: streamedModel,
+        usage: streamedUsage,
+    });
+
+    return fullText;
+}
+
+export async function generateText({ messages, context, onChunk, signal, think = false }) {
+    const modelsToTry = [
+        OPENROUTER_FREE_MODEL_ID,
+        ...FALLBACK_FREE_MODELS
+    ];
+
+    let lastError = null;
+    for (let i = 0; i < modelsToTry.length; i++) {
+        const modelId = modelsToTry[i];
+        try {
+            return await executeGenerateText({
+                modelId,
+                messages,
+                context,
+                onChunk,
+                signal,
+                think
+            });
+        } catch (error) {
+            // If the request was aborted by the user/signal, do not retry
+            if (error.name === 'AbortError' || signal?.aborted) {
+                throw error;
+            }
+            
+            // Check if it's a fatal key/auth error that shouldn't be retried
+            const isAuthError = error.message && (
+                error.message.includes("Clé OpenRouter") || 
+                error.message.includes("Crédits insuffisants") ||
+                error.message.includes("L'intégration IA n'est pas configurée")
+            );
+            if (isAuthError) {
+                throw error;
+            }
+            
+            console.warn(`AI request failed with model ${modelId}. Error: ${error.message || error}. Retrying with next model...`);
+            lastError = error;
+        }
+    }
+    
+    throw lastError || new Error("Échec de la génération de texte après avoir essayé tous les modèles disponibles.");
 }
