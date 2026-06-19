@@ -1,9 +1,9 @@
-use tauri::menu::{Menu, MenuItem};
-use tauri::tray::{MouseButton, TrayIconBuilder, TrayIconEvent};
-use tauri::Manager;
-use std::sync::Mutex;
 use discord_rich_presence::{activity, DiscordIpc, DiscordIpcClient};
 use serde::Deserialize;
+use std::sync::Mutex;
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::tray::{MouseButton, TrayIconBuilder, TrayIconEvent};
+use tauri::{Emitter, Manager};
 
 #[cfg(target_os = "windows")]
 use window_vibrancy::{
@@ -112,7 +112,9 @@ fn discord_rpc_update(
     }
 
     if let Some(client) = guard.as_mut() {
-        client.set_activity(payload).map_err(|error| error.to_string())?;
+        client
+            .set_activity(payload)
+            .map_err(|error| error.to_string())?;
     }
 
     Ok(())
@@ -153,6 +155,18 @@ fn portable_data_dir() -> Result<std::path::PathBuf, String> {
     Ok(exe_dir.join("data"))
 }
 
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+fn emit_tray_action(app: &tauri::AppHandle, action: &str) {
+    show_main_window(app);
+    let _ = app.emit("caltemp-tray-action", action);
+}
+
 #[tauri::command]
 fn is_portable_mode() -> bool {
     portable_mode_enabled()
@@ -169,7 +183,9 @@ fn read_portable_data_file(file_name: String) -> Result<Option<String>, String> 
         return Ok(None);
     }
 
-    std::fs::read_to_string(path).map(Some).map_err(|error| error.to_string())
+    std::fs::read_to_string(path)
+        .map(Some)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -189,10 +205,9 @@ pub fn run() {
         .manage(DiscordRpcState::default())
         .plugin(tauri_plugin_autostart::Builder::new().build())
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            let _ = app
-                .get_webview_window("main")
-                .expect("no main window")
-                .set_focus();
+            let window = app.get_webview_window("main").expect("no main window");
+            let _ = window.show();
+            let _ = window.set_focus();
         }))
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_app::init())
@@ -217,9 +232,40 @@ pub fn run() {
             #[cfg(target_os = "windows")]
             let _ = apply_mica(&window, None);
 
-            let quit_i = MenuItem::with_id(app, "quit", "Quitter", true, None::<&str>)?;
-            let show_i = MenuItem::with_id(app, "show", "Afficher", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show_i, &quit_i])?;
+            let window_for_close = window.clone();
+            window.on_window_event(move |window_event| {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = window_event {
+                    api.prevent_close();
+                    let _ = window_for_close.hide();
+                }
+            });
+
+            let show_i = MenuItem::with_id(app, "show", "Afficher Caltemp", true, None::<&str>)?;
+            let new_event_i =
+                MenuItem::with_id(app, "new_event", "Nouvel événement", true, None::<&str>)?;
+            let dexter_i = MenuItem::with_id(app, "dexter", "Ouvrir Dexter", true, None::<&str>)?;
+            let reminders_i =
+                MenuItem::with_id(app, "reminders", "Tous les événements", true, None::<&str>)?;
+            let settings_i = MenuItem::with_id(app, "settings", "Paramètres", true, None::<&str>)?;
+            let commands_i =
+                MenuItem::with_id(app, "commands", "Palette de commandes", true, None::<&str>)?;
+            let separator_1 = PredefinedMenuItem::separator(app)?;
+            let separator_2 = PredefinedMenuItem::separator(app)?;
+            let quit_i = MenuItem::with_id(app, "quit", "Quitter Caltemp", true, None::<&str>)?;
+            let menu = Menu::with_items(
+                app,
+                &[
+                    &show_i,
+                    &separator_1,
+                    &new_event_i,
+                    &dexter_i,
+                    &reminders_i,
+                    &settings_i,
+                    &commands_i,
+                    &separator_2,
+                    &quit_i,
+                ],
+            )?;
 
             let _tray = TrayIconBuilder::new()
                 .menu(&menu)
@@ -229,10 +275,22 @@ pub fn run() {
                         app.exit(0);
                     }
                     "show" => {
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
+                        show_main_window(app);
+                    }
+                    "new_event" => {
+                        emit_tray_action(app, "new-event");
+                    }
+                    "dexter" => {
+                        emit_tray_action(app, "dexter");
+                    }
+                    "reminders" => {
+                        emit_tray_action(app, "reminders");
+                    }
+                    "settings" => {
+                        emit_tray_action(app, "settings");
+                    }
+                    "commands" => {
+                        emit_tray_action(app, "commands");
                     }
                     _ => {}
                 })
@@ -242,10 +300,7 @@ pub fn run() {
                         ..
                     } => {
                         let app = tray.app_handle();
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
+                        show_main_window(app);
                     }
                     _ => {}
                 })

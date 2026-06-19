@@ -1,7 +1,7 @@
 import React from "react";
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
-import { ArrowUp, Paperclip, Square, X, Mic, Globe, FolderCode, Trash2, Check } from "lucide-react";
+import { ArrowUp, Paperclip, Square, X, Mic, Globe, FolderCode, Check } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 // Utility function for className merging
@@ -148,27 +148,41 @@ const Button = React.forwardRef(({ className, variant = "default", size = "defau
 });
 Button.displayName = "Button";
 
-// Removed AudioPreview, AudioVisualizer, and VoiceRecorder components for dictation-only mode
+export function insertPromptDictationText(content = '', transcript = '', selectionStart = content.length, selectionEnd = selectionStart) {
+  const cleanTranscript = String(transcript || '').trim();
+  if (!cleanTranscript) return content;
 
-const VoiceRecordingOverlay = React.memo(({ duration }) => {
-  const formatTime = (seconds) => {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${m}:${s < 10 ? '0' : ''}${s}`;
-  };
+  const start = Number.isFinite(selectionStart) ? selectionStart : content.length;
+  const end = Number.isFinite(selectionEnd) ? selectionEnd : start;
+  const before = content.slice(0, start).replace(/\s+$/u, '');
+  const after = content.slice(end).replace(/^\s+/u, '');
+  const next = [before, cleanTranscript, after].filter(Boolean).join(' ');
+  return next.replace(/\s+([,.;:!?])/gu, '$1');
+}
 
+export function getDictationUnavailableMessage() {
+  return 'Dictée non disponible dans ce WebView.';
+}
+
+function getSpeechRecognition() {
+  if (typeof window === 'undefined') return null;
+  return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+}
+
+const VoiceRecordingOverlay = React.memo(({ interimText, error }) => {
   return (
-    <div className="px-6 py-8 flex flex-col items-center justify-center space-y-4 animate-in fade-in zoom-in-95 duration-200">
-      <div className="h-16 w-16 bg-red-500/20 text-red-500 rounded-full flex items-center justify-center relative">
-        <div className="absolute inset-0 bg-red-500/20 rounded-full animate-ping" />
-        <Mic className="w-8 h-8" />
-      </div>
-
-      <div className="w-full text-center space-y-2">
-        <p className="text-2xl font-bold text-white tracking-widest font-mono">
-          {formatTime(duration)}
-        </p>
-        <span className="text-[11px] text-white/50 uppercase tracking-widest font-bold">Enregistrement vocal...</span>
+    <div className="mx-2 mb-2 rounded-2xl border border-red-400/20 bg-red-500/10 px-4 py-3 animate-in fade-in zoom-in-95 duration-200">
+      <div className="flex items-center gap-3">
+        <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-red-500/20 text-red-200">
+          <div className="absolute inset-0 rounded-full bg-red-500/20 animate-ping" />
+          <Mic className="relative h-5 w-5" />
+        </div>
+        <div className="min-w-0">
+          <div className="text-sm font-semibold text-white">Dictée en cours</div>
+          <div className="mt-0.5 truncate text-xs text-white/55">
+            {error || interimText || 'Parlez, le texte sera ajouté au message.'}
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -240,13 +254,13 @@ const PromptInput = React.forwardRef((
   ref
 ) => {
   const [internalValue, setInternalValue] = React.useState(value || "");
-  const handleChange = (newValue) => {
+  const handleChange = React.useCallback((newValue) => {
     setInternalValue(newValue);
     // Use startTransition to update parent state without blocking typing
     React.startTransition(() => {
       onValueChange?.(newValue);
     });
-  };
+  }, [onValueChange]);
   const contextValue = React.useMemo(() => ({
     isLoading,
     value: value ?? internalValue,
@@ -384,27 +398,27 @@ export const PromptInputBox = React.forwardRef((
   const [filePreviews, setFilePreviews] = React.useState({});
   const [selectedImage, setSelectedImage] = React.useState(null);
   const [isRecording, setIsRecording] = React.useState(false);
-  const [recordingDuration, setRecordingDuration] = React.useState(0);
-  const [audioUrl, setAudioUrl] = React.useState(null);
-  const [audioFile, setAudioFile] = React.useState(null);
+  const [dictationInterim, setDictationInterim] = React.useState('');
+  const [dictationError, setDictationError] = React.useState('');
   const [isProcessing, setIsProcessing] = React.useState(false);
 
   const [showSearch, setShowSearch] = React.useState(false);
 
   const uploadInputRef = React.useRef(null);
   const promptBoxRef = React.useRef(null);
-  const mediaRecorderRef = React.useRef(null);
-  const audioChunksRef = React.useRef([]);
-  const durationTimerRef = React.useRef(null);
+  const recognitionRef = React.useRef(null);
   const mountedRef = React.useRef(true);
+  const textareaSelectionRef = React.useRef({ start: 0, end: 0 });
 
   // Cleanup on unmount
   React.useEffect(() => {
     return () => {
       mountedRef.current = false;
-      if (durationTimerRef.current) clearInterval(durationTimerRef.current);
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-        mediaRecorderRef.current.stop();
+      if (recognitionRef.current) {
+        recognitionRef.current.onresult = null;
+        recognitionRef.current.onerror = null;
+        recognitionRef.current.onend = null;
+        recognitionRef.current.stop?.();
       }
     };
   }, []);
@@ -504,7 +518,6 @@ export const PromptInputBox = React.forwardRef((
       const formattedInput = messagePrefix ? `${messagePrefix}${finalInput}]` : finalInput;
       
       const sendingFiles = [...finalFiles];
-      if (audioFile) sendingFiles.push(audioFile);
       
       // Inject text file content into the message if present
       let enrichedInput = formattedInput;
@@ -524,79 +537,73 @@ export const PromptInputBox = React.forwardRef((
       setInput("");
       setFiles([]);
       setFilePreviews({});
-      setAudioFile(null);
-      setAudioUrl(null);
+      setDictationInterim('');
+      setDictationError('');
       setIsProcessing(false);
     }
   };
 
-  const getSupportedMimeType = () => {
-    const types = ["audio/mp4", "audio/webm", "audio/ogg", "audio/wav"];
-    for (const type of types) {
-      if (MediaRecorder.isTypeSupported(type)) return type;
+  const startVoiceRecording = () => {
+    const SpeechRecognition = getSpeechRecognition();
+    if (!SpeechRecognition) {
+      setDictationError(getDictationUnavailableMessage());
+      return;
     }
-    return "";
-  };
 
-  const startVoiceRecording = async () => {
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'fr-FR';
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognitionRef.current = recognition;
+
+    recognition.onresult = (event) => {
+      let finalTranscript = '';
+      let interim = '';
+      for (let i = event.resultIndex; i < event.results.length; i += 1) {
+        const transcript = event.results[i][0]?.transcript || '';
+        if (event.results[i].isFinal) finalTranscript += transcript;
+        else interim += transcript;
+      }
+      if (interim) setDictationInterim(interim.trim());
+      if (finalTranscript.trim()) {
+        setInput(prev => insertPromptDictationText(
+          prev,
+          finalTranscript,
+          textareaSelectionRef.current.start ?? prev.length,
+          textareaSelectionRef.current.end ?? textareaSelectionRef.current.start ?? prev.length
+        ));
+        textareaSelectionRef.current = { start: Number.MAX_SAFE_INTEGER, end: Number.MAX_SAFE_INTEGER };
+        setDictationInterim('');
+      }
+    };
+
+    recognition.onerror = () => {
+      setDictationError("Impossible d'utiliser le micro pour la dictée.");
+      setIsRecording(false);
+    };
+
+    recognition.onend = () => {
+      if (mountedRef.current) setIsRecording(false);
+    };
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mimeType = getSupportedMimeType();
-      const mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-      mediaRecorderRef.current = mediaRecorder;
-      audioChunksRef.current = [];
-
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-        }
-      };
-
-      mediaRecorder.onstop = () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType || 'audio/webm' });
-        const url = URL.createObjectURL(audioBlob);
-        setAudioUrl(url);
-        
-        // Extension varies based on mime type
-        let ext = 'webm';
-        if (mimeType.includes('mp4')) ext = 'mp4';
-        else if (mimeType.includes('ogg')) ext = 'ogg';
-        else if (mimeType.includes('wav')) ext = 'wav';
-        
-        const file = new File([audioBlob], `voice_message_${Date.now()}.${ext}`, { type: mimeType || 'audio/webm' });
-        setAudioFile(file);
-        
-        stream.getTracks().forEach(track => track.stop());
-      };
-
-      mediaRecorder.start();
+      setDictationError('');
+      setDictationInterim('');
       setIsRecording(true);
-      setRecordingDuration(0);
-
-      durationTimerRef.current = setInterval(() => {
-        setRecordingDuration(prev => prev + 1);
-      }, 1000);
-
+      recognition.start();
     } catch (err) {
       console.error("Microphone error:", err);
-      alert("Accès au microphone refusé.");
+      setIsRecording(false);
+      setDictationError("Impossible d'utiliser le micro pour la dictée.");
     }
   };
 
   const stopVoiceRecording = () => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-      mediaRecorderRef.current.stop();
-    }
+    recognitionRef.current?.stop?.();
     setIsRecording(false);
-    clearInterval(durationTimerRef.current);
   };
 
-  const discardAudio = () => {
-    setAudioUrl(null);
-    setAudioFile(null);
-  };
-
-  const hasContent = input.trim() !== "" || files.length > 0 || audioFile !== null;
+  const hasContent = input.trim() !== "" || files.length > 0;
 
   return (
     <>
@@ -616,18 +623,7 @@ export const PromptInputBox = React.forwardRef((
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}>
         
-        {audioUrl && !isRecording && (
-          <div className="flex items-center gap-3 p-3 m-2 bg-white/5 border border-white/10 rounded-2xl animate-in fade-in zoom-in-95">
-            <button onClick={discardAudio} className="p-2 text-white/40 hover:text-red-400 hover:bg-red-400/10 rounded-full transition-colors">
-              <Trash2 className="w-4 h-4" />
-            </button>
-            <div className="flex-1">
-              <audio src={audioUrl} controls className="w-full h-8 [&::-webkit-media-controls-panel]:bg-white/5 [&::-webkit-media-controls-current-time-display]:text-white [&::-webkit-media-controls-time-remaining-display]:text-white" />
-            </div>
-          </div>
-        )}
-
-        {files.length > 0 && !isRecording && !audioUrl && (
+        {files.length > 0 && !isRecording && (
           <div className="flex flex-wrap gap-3 p-2 pb-3 transition-all duration-300">
             {files.map((file, index) => (
               <div key={index} className="relative group animate-in zoom-in fade-in">
@@ -675,10 +671,16 @@ export const PromptInputBox = React.forwardRef((
                 ? "Recherche web..."
                 : placeholder
             }
-            className="text-base" />
+            className="text-base"
+            onSelect={(event) => {
+              textareaSelectionRef.current = {
+                start: event.currentTarget.selectionStart,
+                end: event.currentTarget.selectionEnd,
+              };
+            }} />
         </div>
 
-        {isRecording && <VoiceRecordingOverlay duration={recordingDuration} />}
+        {(isRecording || dictationError) && <VoiceRecordingOverlay interimText={dictationInterim} error={dictationError} />}
         {isProcessing && <ProcessingOverlay />}
 
         <PromptInputActions className="flex items-center justify-between gap-2 p-0 pt-2">

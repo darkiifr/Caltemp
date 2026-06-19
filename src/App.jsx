@@ -3,6 +3,7 @@ import { Calendar as CalendarIcon, Settings, Bot, ListTodo } from 'lucide-react'
 import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { type } from '@tauri-apps/plugin-os';
 import { relaunch } from '@tauri-apps/plugin-process';
 import CalendarView from "./components/CalendarView";
@@ -410,6 +411,7 @@ function App() {
       `${normalizedEvent.title} le ${formatEventDate(normalizedEvent.date, settings)}`,
       'success'
     );
+    return updatedEvents;
   }, [events, notify, selectedEvent, settings]);
 
   const handleImportEvents = async (importedEvents, importOptions = {}) => {
@@ -487,6 +489,39 @@ function App() {
       notify('Export PDF', error.message || 'Impossible d’exporter la vue.', 'error');
     }
   }, [notify]);
+
+  useEffect(() => {
+    if (!window.__TAURI_INTERNALS__) return undefined;
+
+    let unlisten = null;
+    let cancelled = false;
+
+    listen('caltemp-tray-action', (event) => {
+      const action = event.payload;
+      if (action === 'new-event') {
+        handleAddEvent(new Date());
+      } else if (action === 'dexter') {
+        setIsDexterOpen(true);
+      } else if (action === 'reminders') {
+        setIsRemindersOpen(true);
+      } else if (action === 'settings') {
+        setSettingsInitialTab('general');
+        setIsSettingsOpen(true);
+      } else if (action === 'commands') {
+        setIsCommandPaletteOpen(true);
+      }
+    }).then((cleanup) => {
+      if (cancelled) cleanup();
+      else unlisten = cleanup;
+    }).catch((error) => {
+      console.error('Impossible d’écouter les actions de la zone de notification.', error);
+    });
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [handleAddEvent]);
 
   const commandActions = useMemo(() => [
     {
@@ -755,7 +790,14 @@ function App() {
         y={contextMenu.y}
         visible={contextMenu.visible}
         onClose={() => setContextMenu({ ...contextMenu, visible: false })}
-        onSettings={() => setIsSettingsOpen(true)}
+        onSettings={() => {
+          setSettingsInitialTab('general');
+          setIsSettingsOpen(true);
+        }}
+        onNewEvent={handleAddEvent}
+        onToggleDexter={() => setIsDexterOpen(true)}
+        onOpenReminders={() => setIsRemindersOpen(true)}
+        onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
       />
     </div>
     </div>

@@ -60,6 +60,7 @@ describe('Dexter local commands', () => {
     expect(response.handled).toBe(true);
     expect(response.message).toContain('1 événement');
     expect(response.message).toContain('alertes actives');
+    expect(response.message).not.toContain('reminder');
   });
 
   it('answers next matching reminder questions from local events', () => {
@@ -108,6 +109,23 @@ describe('Dexter local commands', () => {
     expect(response.type).toBe('reminder-list');
     expect(response.message).toContain('Dentiste');
     expect(response.message).toContain('Réunion');
+  });
+
+  it('uses display category labels in local statistics instead of internal keys', () => {
+    const response = handleLocalDexterCommand('montre les stats', {
+      events: [
+        { title: 'Sprint', date: '2026-06-18T09:00:00.000Z', category: 'dev' },
+      ],
+      settings: {
+        categoryLegend: {
+          dev: { label: 'Technique', color: '#a78bfa' },
+        },
+      },
+    });
+
+    expect(response.handled).toBe(true);
+    expect(response.message).toContain('Technique : 1');
+    expect(response.message).not.toContain('dev : 1');
   });
 
   it('updates the alert status of a matching reminder locally', () => {

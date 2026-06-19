@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseDexterAction } from './dexterActions';
+import { parseDexterAction, sanitizeDexterReply } from './dexterActions';
 
 describe('Dexter action parsing', () => {
   it('extracts a valid create_event action from fenced JSON', () => {
@@ -44,5 +44,30 @@ describe('Dexter action parsing', () => {
 
     expect(result.ok).toBe(false);
     expect(result.error).toMatch(/non prise en charge/i);
+  });
+
+  it('sanitizes leaked internal action details from visible assistant replies', () => {
+    const response = [
+      'Rappel créé :',
+      '```json',
+      '{"action":"create_event","data":{"title":"Rentrée","category":"perso","color":"#60a5fa","reminder":true}}',
+      '```',
+      '- Catégorie : `perso`',
+      '- Couleur : `#60a5fa`',
+      'Je fournirai le JSON d_update.',
+    ].join('\n');
+
+    const cleaned = sanitizeDexterReply(response, {
+      categoryLegend: {
+        perso: { label: 'Perso', color: '#22c55e' },
+      },
+    });
+
+    expect(cleaned).toContain('Rappel créé');
+    expect(cleaned).not.toContain('create_event');
+    expect(cleaned).not.toContain('reminder');
+    expect(cleaned).not.toContain('#60a5fa');
+    expect(cleaned).not.toContain('JSON');
+    expect(cleaned).not.toContain('`perso`');
   });
 });
