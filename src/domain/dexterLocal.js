@@ -287,7 +287,7 @@ export function handleLocalDexterCommand(input, context = {}) {
       handled: true,
       type: 'reminder-status',
       message: total
-        ? `${enabled} événement${enabled > 1 ? 's' : ''} avec alertes actives, ${disabled} sans alerte. Les nouveaux événements créés par Dexter peuvent inclure "reminder": true si tu demandes un rappel.`
+        ? `${enabled} événement${enabled > 1 ? 's' : ''} avec alertes actives, ${disabled} sans alerte. Pour les nouveaux rappels, demande simplement "avec une alerte" ou "rappelle-moi".`
         : 'Aucun événement enregistré pour analyser les alertes. Demande un rappel lors de la création pour activer une alerte.',
       data: { total, enabled, disabled },
     };

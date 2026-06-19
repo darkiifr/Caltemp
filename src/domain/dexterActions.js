@@ -73,3 +73,40 @@ export function removeDexterActionJson(text = '') {
     .replace(/\{[\s\S]*"action"\s*:\s*"(create_event|update_event)"[\s\S]*\}/gi, '')
     .trim();
 }
+
+export function sanitizeDexterReply(text = '', settings = {}) {
+  const categoryLegend = settings.categoryLegend || {};
+  const categoryKeys = new Set(Object.keys(categoryLegend));
+  const categoryLabels = new Set(
+    Object.values(categoryLegend)
+      .map(meta => String(meta?.label || '').toLocaleLowerCase('fr-FR'))
+      .filter(Boolean)
+  );
+
+  const withoutActions = removeDexterActionJson(text)
+    .replace(/\b(create_event|update_event|input_audio|d_update)\b/gi, '')
+    .replace(/#[0-9a-f]{6}\b/gi, '')
+    .replace(/\bJSON\b/gi, '')
+    .replace(/"?\b(action|data|reminder|category|color|tags|durationMinutes)\b"?\s*:?\s*(true|false)?/gi, '')
+    .replace(/`([^`]+)`/g, '$1');
+
+  const lines = withoutActions
+    .split('\n')
+    .map(line => line.replace(/\s{2,}/g, ' ').trimEnd())
+    .filter((line) => {
+      const normalized = line.trim().toLocaleLowerCase('fr-FR');
+      if (!normalized) return true;
+      if (/^[-*]\s*(couleur|tags?)\s*:/i.test(line)) return false;
+      if (/\bfournirai\b.*\b(action|mise à jour|mise a jour)\b/i.test(line)) return false;
+      const categoryLine = line.match(/^[-*]\s*Catégorie\s*:\s*(.+)$/i);
+      if (!categoryLine) return true;
+      const value = categoryLine[1].trim().toLocaleLowerCase('fr-FR');
+      return !categoryKeys.has(value) || categoryLabels.has(value);
+    });
+
+  return lines
+    .join('\n')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}

@@ -10,7 +10,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ChevronDown, ChevronUp, Brain } from 'lucide-react';
 import { handleLocalDexterCommand } from '../domain/dexterLocal';
-import { parseDexterAction, removeDexterActionJson } from '../domain/dexterActions';
+import { parseDexterAction, removeDexterActionJson, sanitizeDexterReply } from '../domain/dexterActions';
 import { getNextOccurrence } from '../domain/events';
 
 const DEXTER_HISTORY_STORAGE_KEY = 'caltemp.dexter.conversations.v1';
@@ -244,6 +244,7 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent, onO
     const messagesEndRef = useRef(null);
     const abortControllerRef = useRef(null);
     const referencedEventIdRef = useRef(null);
+    const eventsRef = useRef(events);
     const quickPrompts = [
         'Résume ma semaine',
         'Montre les catégories',
@@ -280,6 +281,10 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent, onO
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [messages, isTyping]);
+
+    useEffect(() => {
+        eventsRef.current = events;
+    }, [events]);
 
 
 
@@ -366,17 +371,19 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent, onO
         if (isSearch) setIsSearching(true);
 
         const localCommand = handleLocalDexterCommand(cleanValue, {
-            events,
+            events: eventsRef.current,
             settings,
             now: new Date(),
             referencedEventId: referencedEventIdRef.current,
         });
         if (localCommand.handled) {
             if (localCommand.type === 'create-event' && localCommand.event) {
-                await onAddEvent(localCommand.event);
+                const updatedEvents = await onAddEvent(localCommand.event);
+                if (Array.isArray(updatedEvents)) eventsRef.current = updatedEvents;
             }
             if (localCommand.type === 'update-event' && localCommand.event) {
-                await onAddEvent(localCommand.event);
+                const updatedEvents = await onAddEvent(localCommand.event);
+                if (Array.isArray(updatedEvents)) eventsRef.current = updatedEvents;
             }
             const referencedEvent = localCommand.event || localCommand.data;
             if (referencedEvent?.id) {
@@ -419,7 +426,7 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent, onO
         if (isAiConfigured()) {
             try {
                 let aiMessages = [];
-                let userContent = [{ type: "text", text: userMsg.content || "Veuillez analyser ce document ou cet audio." }];
+                let userContent = [{ type: "text", text: userMsg.content || "Veuillez analyser ce document." }];
                 if (files.length > 0) {
                     for (const file of files) {
                         const base64 = await fileToBase64(file);
@@ -427,19 +434,6 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent, onO
                             userContent.push({
                                 type: "image_url",
                                 image_url: { url: base64 }
-                            });
-                        } else if (file.type.startsWith('audio/')) {
-                            const rawBase64 = base64.split(',')[1];
-                            let format = file.type.split('/')[1].split(';')[0];
-                            if (format.includes('webm')) format = 'wav'; // OpenRouter/Gemini usually expects wav, mp3, ogg. WebM might be unsupported by some APIs, but we will pass wav to let the API handle it, or pass the actual type. Let's pass the raw format just in case, openrouter can usually handle it.
-                            if (format === 'webm') format = 'mp3'; // safe fallback
-                            
-                            userContent.push({
-                                type: "input_audio",
-                                input_audio: {
-                                    data: rawBase64,
-                                    format: format
-                                }
                             });
                         }
                     }
@@ -454,7 +448,7 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent, onO
                 const legendLines = Object.entries(settings?.categoryLegend || {})
                     .map(([key, meta]) => `${key}=${meta?.label || key}`)
                     .join(', ');
-                const calendarContext = buildDexterCalendarContext(events, settings);
+                const calendarContext = buildDexterCalendarContext(eventsRef.current, settings);
                 let systemInstruction = `Tu es Dexter, l'assistant intelligent de Caltemp. Nous sommes le ${now.toLocaleString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}. Tu aides à gérer un calendrier local, des notes, des catégories, des rappels et des imports ICS. Catégories disponibles : ${legendLines || 'cours, devoir, examen, perso, dev'}.\n\n${calendarContext}`;
                 
                 if (isSearch) systemInstruction += "\n\nINFORMATIONS TROUVÉES SUR LE WEB :\nTu dois baser ta réponse sur ces informations contextuelles. NE GÉNÈRE AUCUN JSON NI REQUÊTE DE RECHERCHE, réponds directement à l'utilisateur en langage naturel.";
@@ -462,7 +456,7 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent, onO
 
                 const systemPrompt = {
                     role: "system",
-                    content: `${systemInstruction}\n\nDIRECTIVES IMPORTANTES:\n1. Si l'utilisateur demande une information déjà présente dans les rappels à venir ci-dessus, réponds avec ces données locales et ne dis jamais que tu n'as pas accès au calendrier.\n2. Si l'utilisateur te demande de créer un événement ou un rappel, réponds TOUJOURS avec un bloc JSON entouré de balises de code: \`\`\`json\n{"action": "create_event", "data": {"title": "...", "date": "ISO8601 complète", "description": "...", "category": "cours|devoir|examen|perso|dev ou catégorie existante", "color": "#60a5fa si pertinent", "tags": ["..."], "recurrence": "none|daily|weekly|monthly|yearly", "reminder": true, "durationMinutes": 60}}\n\`\`\`\n3. Si l'utilisateur demande de modifier un rappel existant listé ci-dessus, utilise son id exact et réponds avec : \`\`\`json\n{"action": "update_event", "data": {"id": "...", "title": "... optionnel", "date": "ISO8601 optionnel", "category": "... optionnel", "reminder": true}}\n\`\`\`\n4. Utilise une date ISO complète et valide. Pour un anniversaire, mets "recurrence": "yearly".\n5. N'invente pas d'action dangereuse : imports, exports, suppressions larges et grands changements de paramètres doivent ouvrir ou expliquer le flux UI de confirmation.\n6. Tu peux répondre sur catégories, légendes, alertes, routines, imports ICS, statistiques et notes en Markdown clair.`
+                    content: `${systemInstruction}\n\nDIRECTIVES IMPORTANTES:\n1. Si l'utilisateur demande une information déjà présente dans les rappels à venir ci-dessus, réponds avec ces données locales et ne dis jamais que tu n'as pas accès au calendrier.\n2. Pour créer ou modifier un rappel, fournis une action machine JSON minimale si nécessaire, mais n'explique jamais les champs techniques à l'utilisateur.\n3. Ne montre pas de noms de fonctions, clés internes, couleurs hexadécimales, identifiants ou JSON dans le texte visible.\n4. Après une création ou modification, le texte visible doit être un résumé naturel avec titre, date et statut d'alerte.\n5. N'invente pas d'action dangereuse : imports, exports, suppressions larges et grands changements de paramètres doivent ouvrir ou expliquer le flux UI de confirmation.\n6. Tu peux répondre sur catégories, légendes, alertes, routines, imports ICS, statistiques et notes en Markdown clair.`
                 };
 
                 // --- SEARCH PHASE ---
@@ -508,6 +502,7 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent, onO
                         displayContent = displayContent.replace(/Search web\.\{.*?\}/g, '');
                         displayContent = displayContent.replace(/^\{"query":.*?"source":.*?"\}\s*/g, '');
                         displayContent = displayContent.replace(/^\{"query":.*?\}\s*/g, '');
+                        displayContent = sanitizeDexterReply(displayContent, settings) || displayContent;
 
                         setMessages(prev => prev.map(msg => 
                             msg.id === assistantMsgId ? { ...msg, content: displayContent, isStreaming: true } : msg
@@ -527,7 +522,8 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent, onO
                         id: Date.now().toString(),
                     };
 
-                    await onAddEvent(finalEvent);
+                    const updatedEvents = await onAddEvent(finalEvent);
+                    if (Array.isArray(updatedEvents)) eventsRef.current = updatedEvents;
 
                     let dateStr = "Date non spécifiée";
                     try {
@@ -542,13 +538,13 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent, onO
                     }
 
                     setMessages(prev => prev.map(msg =>
-                        msg.id === assistantMsgId ? { ...msg, content: `✅ **C'est noté !**\n\n**Titre :** ${finalEvent.title}\n**Date :** ${dateStr}`, isStreaming: false } : msg
+                        msg.id === assistantMsgId ? { ...msg, content: `✅ **C'est noté !**\n\n**Titre :** ${finalEvent.title}\n**Date :** ${dateStr}\n**Alerte :** ${finalEvent.reminder ? 'activée' : 'désactivée'}`, isStreaming: false } : msg
                     ));
 
                     if (isSearch) setIsSearching(false);
                     return;
                 } else if (actionResult.ok && actionResult.action === 'update_event') {
-                    const existingEvent = events.find(event => event.id === actionResult.data.id);
+                    const existingEvent = eventsRef.current.find(event => event.id === actionResult.data.id);
                     if (!existingEvent) {
                         setMessages(prev => prev.map(msg =>
                             msg.id === assistantMsgId ? { ...msg, content: "Je n’ai pas trouvé ce rappel dans Caltemp. Réessaie avec un mot du titre du rappel.", isStreaming: false } : msg
@@ -563,7 +559,8 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent, onO
                         id: existingEvent.id,
                     };
 
-                    await onAddEvent(finalEvent);
+                    const updatedEvents = await onAddEvent(finalEvent);
+                    if (Array.isArray(updatedEvents)) eventsRef.current = updatedEvents;
 
                     let dateStr = "Date inchangée";
                     try {
@@ -591,6 +588,7 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent, onO
                     .replace(/^\{"query":.*?"source":.*?"\}\s*/g, '')
                     .replace(/^\{"query":.*?\}\s*/g, '')
                     .trim();
+                cleanResponse = sanitizeDexterReply(cleanResponse, settings);
                     
                 if (!cleanResponse && hadActionJson && !actionResult.ok) {
                     cleanResponse = `Je n’ai pas pu exécuter l’action demandée : ${actionResult.error}`;
