@@ -6,12 +6,34 @@ import {
 } from './dexterRouting';
 
 describe('Dexter routing', () => {
-  it('routes typed creation requests to AI when AI is available', () => {
+  it('routes typed calendar requests to the local engine even when AI is available', () => {
     expect(shouldUseLocalDexterCommand({
       source: 'typed',
+      text: 'liste mes rappels',
       aiEnabled: true,
       aiConfigured: true,
-    })).toBe(false);
+    })).toBe(true);
+
+    expect(shouldUseLocalDexterCommand({
+      source: 'typed',
+      text: 'déplace france à 21h',
+      aiEnabled: true,
+      aiConfigured: true,
+    })).toBe(true);
+
+    expect(shouldUseLocalDexterCommand({
+      source: 'typed',
+      text: "active l'alerte",
+      aiEnabled: true,
+      aiConfigured: true,
+    })).toBe(true);
+
+    expect(shouldUseLocalDexterCommand({
+      source: 'typed',
+      text: 'résume ma semaine',
+      aiEnabled: true,
+      aiConfigured: true,
+    })).toBe(true);
   });
 
   it('keeps the home quick prompts on the local engine', () => {
@@ -22,11 +44,12 @@ describe('Dexter routing', () => {
     })).toBe(true);
   });
 
-  it('does not use local fallback for typed messages when AI cannot run', () => {
+  it('does not force web questions through the local calendar engine', () => {
     expect(shouldUseLocalDexterCommand({
       source: 'typed',
+      text: 'cherche la météo sur internet',
       aiEnabled: true,
-      aiConfigured: false,
+      aiConfigured: true,
     })).toBe(false);
   });
 

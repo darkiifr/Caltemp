@@ -22,7 +22,7 @@ import { normalizeIcsSources } from '../domain/icsSources';
 import { buildImportEventKey, isValidIcsUrl } from '../domain/icsImport';
 import { isHttpsImageUrl, resolveBackgroundImageUrl } from '../utils/background';
 import { getCompatibleWindowEffect, isWindowEffectSupported, WINDOW_EFFECTS } from '../utils/windowEffects';
-import { isAiConfigured, OPENROUTER_FREE_MODEL_ID } from '../services/ai';
+import { FREE_MODEL_PREFERENCES, isAiConfigured } from '../services/ai';
 import { getMostUsedAiModel, normalizeAiUsageStats } from '../domain/aiUsage';
 
 const formatUsageNumber = (value) => Number(value || 0).toLocaleString('fr-FR');
@@ -1098,7 +1098,7 @@ export default function SettingsModal({
                                                         </span>
                                                     </div>
                                                     <p className="mt-2 max-w-2xl text-sm leading-6 text-gray-400">
-                                                        L’assistant utilise automatiquement le routeur gratuit d’OpenRouter. Aucun modèle ni clé API ne peut être saisi dans l’application.
+                                                        L’assistant utilise automatiquement un routeur maison limité aux modèles gratuits d’OpenRouter. Aucun modèle ni clé API ne peut être saisi dans l’application.
                                                     </p>
                                                 </div>
                                             </div>
@@ -1164,9 +1164,9 @@ export default function SettingsModal({
 
                                             <div className="rounded-lg border border-white/10 bg-[#181818] p-4">
                                                 <div className="text-sm font-medium text-white">Routeur</div>
-                                                <div className="mt-2 font-mono text-sm text-gray-200">{OPENROUTER_FREE_MODEL_ID}</div>
+                                                <div className="mt-2 font-mono text-sm text-gray-200">3 modèles gratuits dynamiques</div>
                                                 <div className="mt-4 text-xs leading-5 text-gray-500">
-                                                    {formatUsageNumber(Object.keys(aiUsageStats.models).length)} modèle{Object.keys(aiUsageStats.models).length > 1 ? 's' : ''} observé{Object.keys(aiUsageStats.models).length > 1 ? 's' : ''} derrière le routeur.
+                                                    Préférés : {FREE_MODEL_PREFERENCES.join(', ')}. Dexter complète automatiquement si l’un n’est plus disponible.
                                                 </div>
                                             </div>
                                         </div>
