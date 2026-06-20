@@ -1,5 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { generateText, isAiConfigured, OPENROUTER_FREE_MODEL_ID, OPENROUTER_FREE_MODEL_IDS } from './ai';
+import {
+  FREE_MODEL_PREFERENCES,
+  generateText,
+  isAiConfigured,
+  OPENROUTER_FREE_MODEL_ID,
+  OPENROUTER_FREE_MODEL_IDS,
+} from './ai';
+
+const { tauriFetchMock } = vi.hoisted(() => ({
+  tauriFetchMock: vi.fn(),
+}));
+
+vi.mock('@tauri-apps/plugin-http', () => ({
+  fetch: tauriFetchMock,
+}));
 
 function jsonResponse(payload) {
   return {
@@ -16,9 +30,25 @@ describe('AI OpenRouter service', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
+    tauriFetchMock.mockReset();
   });
 
-  it('uses the Free Models Router and build-time API key for completions', async () => {
+  it('uses the dynamic free model router and build-time API key for completions', async () => {
+    tauriFetchMock.mockImplementation(async (url) => {
+      if (String(url).includes('openrouter.ai/api/v1/models')) {
+        return jsonResponse({
+          data: [
+            {
+              id: FREE_MODEL_PREFERENCES[0],
+              pricing: { prompt: '0', completion: '0' },
+              architecture: { output_modalities: ['text'] },
+              supported_parameters: ['tools'],
+            },
+          ],
+        });
+      }
+      return jsonResponse({});
+    });
     const fetchMock = vi.fn(async () => jsonResponse({
       model: 'meta-llama/llama-free',
       usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
@@ -37,10 +67,10 @@ describe('AI OpenRouter service', () => {
     const [, request] = fetchMock.mock.calls[0];
     expect(result).toBe('Réponse Dexter');
     expect(request.headers.Authorization).toBe('Bearer test-openrouter-key');
-    expect(JSON.parse(request.body).model).toBe(OPENROUTER_FREE_MODEL_ID);
+    expect(JSON.parse(request.body).model).toBe(FREE_MODEL_PREFERENCES[0]);
     expect(listener).toHaveBeenCalledTimes(1);
     expect(listener.mock.calls[0][0].detail).toMatchObject({
-      model: OPENROUTER_FREE_MODEL_IDS[0],
+      model: FREE_MODEL_PREFERENCES[0],
       actualModel: 'meta-llama/llama-free',
       usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
     });

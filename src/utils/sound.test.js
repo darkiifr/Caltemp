@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@tauri-apps/api/core', () => ({
   convertFileSrc: (path) => `asset://${path}`,
@@ -16,10 +16,30 @@ vi.mock('@tauri-apps/plugin-fs', () => ({
   writeFile: vi.fn(),
 }));
 
-import { DEFAULT_SOUND_CONFIG, normalizeSoundConfig, playSoundPreview, SOUND_PRESETS } from './sound';
-import { copyCustomSoundToAppData, getSoundDisplayName, getSoundMimeType } from './soundFiles';
+let DEFAULT_SOUND_CONFIG;
+let SOUND_PRESETS;
+let normalizeSoundConfig;
+let playSoundPreview;
+let copyCustomSoundToAppData;
+let getSoundDisplayName;
+let getSoundMimeType;
 
 describe('sound settings', () => {
+  beforeEach(async () => {
+    vi.resetModules();
+    ({
+      DEFAULT_SOUND_CONFIG,
+      SOUND_PRESETS,
+      normalizeSoundConfig,
+      playSoundPreview,
+    } = await import('./sound'));
+    ({
+      copyCustomSoundToAppData,
+      getSoundDisplayName,
+      getSoundMimeType,
+    } = await import('./soundFiles'));
+  });
+
   it('normalise une ancienne configuration avec chemins personnalisés', () => {
     const config = normalizeSoundConfig({
       bubble: 'C:/sons/clic.wav',

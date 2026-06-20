@@ -27,6 +27,7 @@ import { formatEventDate, normalizeEvent, normalizeEvents, normalizeSettings } f
 import { recordAiUsage } from "./domain/aiUsage";
 import { applyIcsImportOptions } from "./domain/icsImport";
 import { applyNotificationMarks, buildReminderNotifications, snoozeEventOccurrence } from "./domain/reminders";
+import { computeReminderCheckDelay } from "./domain/reminderScheduler";
 import { exportElementAsPdf, exportElementAsPng } from "./utils/exportView";
 import { FastAverageColor } from "fast-average-color";
 import { resolveBackgroundImageUrl } from "./utils/background";
@@ -374,8 +375,11 @@ function App() {
         saveEvents(marked.events);
       }
 
-      // Schedule next run: 5 seconds if visible, 60 seconds if in background
-      const delay = document.hidden ? 60000 : 5000;
+      const delay = computeReminderCheckDelay({
+        events: marked.events,
+        now,
+        hidden: document.hidden,
+      });
       timeoutId = setTimeout(checkReminders, delay);
     };
 

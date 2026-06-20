@@ -1,4 +1,4 @@
-import { fetch } from '@tauri-apps/plugin-http';
+import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 
 export const OPENROUTER_FREE_MODEL_IDS = [
     'openai/gpt-oss-120b:free',
@@ -6,6 +6,8 @@ export const OPENROUTER_FREE_MODEL_IDS = [
     'google/gemma-3-12b-it:free'
 ];
 export const OPENROUTER_FREE_MODEL_ID = OPENROUTER_FREE_MODEL_IDS[0];
+export const FREE_MODEL_PREFERENCES = OPENROUTER_FREE_MODEL_IDS;
+export const FALLBACK_FREE_MODELS = OPENROUTER_FREE_MODEL_IDS;
 
 export function getOpenRouterApiKey() {
     return import.meta.env.VITE_OPENROUTER_API_KEY?.trim() || '';
@@ -28,7 +30,7 @@ function emitAiUsage(detail) {
 export async function searchWeb(query) {
     try {
         const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1`;
-        const response = await fetch(url, {
+        const response = await tauriFetch(url, {
             method: 'GET',
             headers: { 'User-Agent': 'Caltemp/1.0' }
         });
@@ -65,7 +67,75 @@ export async function searchWeb(query) {
     }
 }
 
-async function executeGenerateText({ modelId, messages, context, onChunk, signal, think = false }) {
+function isZeroCost(value) {
+    return Number(value) === 0;
+}
+
+function isTextOutputModel(model = {}) {
+    const output = model.architecture?.output_modalities;
+    if (Array.isArray(output)) return output.includes('text');
+    if (typeof model.architecture?.modality === 'string') return /->.*text/.test(model.architecture.modality);
+    return true;
+}
+
+function isExpired(model = {}, now = new Date()) {
+    const expirationDate = model.expiration_date || model.expirationDate;
+    if (!expirationDate) return false;
+    const expiry = new Date(expirationDate);
+    return !Number.isNaN(expiry.getTime()) && expiry <= now;
+}
+
+export function selectFreeOpenRouterModels(models = [], { now = new Date(), limit = 3 } = {}) {
+    const usable = models
+        .filter(model => model?.id && model.id !== OPENROUTER_FREE_MODEL_ID)
+        .filter(model => isZeroCost(model.pricing?.prompt) && isZeroCost(model.pricing?.completion))
+        .filter(model => isTextOutputModel(model))
+        .filter(model => !isExpired(model, now));
+
+    const usableIds = new Set(usable.map(model => model.id));
+    return OPENROUTER_FREE_MODEL_IDS
+        .filter(id => id === OPENROUTER_FREE_MODEL_ID || usableIds.has(id))
+        .slice(0, limit);
+}
+
+function fallbackFreeModelEntries() {
+    return FALLBACK_FREE_MODELS.map((id) => ({
+        id,
+        pricing: { prompt: '0', completion: '0' },
+        architecture: { output_modalities: ['text'] },
+        supported_parameters: ['temperature'],
+    }));
+}
+
+async function getFreeModelsToTry() {
+    return selectFreeOpenRouterModels(fallbackFreeModelEntries());
+}
+
+function createOpenRouterError(status, message) {
+    const error = new Error(message);
+    error.status = status;
+    return error;
+}
+
+export function shouldRetryOpenRouterError(error) {
+    if (!error) return false;
+    if (error.name === 'AbortError') return false;
+    const status = error.status || error.response?.status;
+    if ([401, 402, 403].includes(status)) return false;
+    if ([408, 409, 425, 429, 500, 502, 503, 504].includes(status)) return true;
+    const message = String(error.message || error).toLocaleLowerCase('fr-FR');
+    if (message.includes('clé openrouter') || message.includes('crédits insuffisants') || message.includes("n'est pas configurée")) return false;
+    return message.includes('timeout')
+        || message.includes('rate limit')
+        || message.includes('limite de requêtes')
+        || message.includes('indisponible')
+        || message.includes('hors ligne')
+        || message.includes('empty response')
+        || message.includes('réponse vide')
+        || message.includes('provider');
+}
+
+async function executeGenerateText({ modelId, messages, context, onChunk, signal, think = false, maxTokens }) {
     const apiKey = getOpenRouterApiKey();
     if (!apiKey) throw new Error("L'intégration IA n'est pas configurée dans ce build.");
 
@@ -120,7 +190,7 @@ async function executeGenerateText({ modelId, messages, context, onChunk, signal
         model: modelId,
         messages: finalMessages,
         temperature: think ? 0.9 : 0.7,
-        max_tokens: 4000,
+        max_tokens: maxTokens || (think ? 2200 : 1200),
         stream: !!onChunk
     };
     if (onChunk) {
@@ -151,13 +221,13 @@ async function executeGenerateText({ modelId, messages, context, onChunk, signal
         // Map standard status codes to user-friendly messages
         switch (response.status) {
             case 401: throw new Error("Clé OpenRouter invalide dans ce build.");
-            case 402: throw new Error("Crédits insuffisants sur OpenRouter.");
-            case 403: throw new Error("Accès refusé. Le contenu a peut-être été filtré ou votre limite est atteinte.");
-            case 404: throw new Error("Free Models Router indisponible pour le moment.");
-            case 429: throw new Error("Limite de requêtes atteinte. Réessayez dans un instant.");
+            case 402: throw createOpenRouterError(response.status, "Crédits insuffisants sur OpenRouter.");
+            case 403: throw createOpenRouterError(response.status, "Accès refusé. Le contenu a peut-être été filtré ou votre limite est atteinte.");
+            case 404: throw createOpenRouterError(response.status, "Modèle gratuit indisponible pour le moment.");
+            case 429: throw createOpenRouterError(response.status, "Limite de requêtes atteinte. Réessayez dans un instant.");
             case 502: 
-            case 503: throw new Error("Free Models Router est actuellement hors ligne. Réessayez dans un instant.");
-            default: throw new Error(errorMsg);
+            case 503: throw createOpenRouterError(response.status, "Modèle gratuit actuellement hors ligne. Réessayez dans un instant.");
+            default: throw createOpenRouterError(response.status, errorMsg);
         }
     }
 
@@ -166,6 +236,7 @@ async function executeGenerateText({ modelId, messages, context, onChunk, signal
         const data = await response.json();
         if (data.error) throw new Error(data.error.message || "Erreur API inconnue");
         const content = data.choices[0].message.content;
+        if (!content?.trim()) throw createOpenRouterError(502, 'Réponse vide du fournisseur.');
         
         if (/^User Safety:/i.test(content.trim())) {
             throw new Error("SafetyVerdictError");
@@ -251,8 +322,10 @@ async function executeGenerateText({ modelId, messages, context, onChunk, signal
     return fullText;
 }
 
-export async function generateText({ messages, context, onChunk, signal, think = false }) {
-    const modelsToTry = OPENROUTER_FREE_MODEL_IDS;
+export async function generateText({ messages, context, onChunk, signal, think = false, maxTokens }) {
+    if (!getOpenRouterApiKey()) throw new Error("L'intégration IA n'est pas configurée dans ce build.");
+
+    const modelsToTry = await getFreeModelsToTry();
 
     let lastError = null;
     for (let i = 0; i < modelsToTry.length; i++) {
@@ -264,7 +337,8 @@ export async function generateText({ messages, context, onChunk, signal, think =
                 context,
                 onChunk,
                 signal,
-                think
+                think,
+                maxTokens
             });
         } catch (error) {
             // If the request was aborted by the user/signal, do not retry
@@ -272,13 +346,7 @@ export async function generateText({ messages, context, onChunk, signal, think =
                 throw error;
             }
             
-            // Check if it's a fatal key/auth error that shouldn't be retried
-            const isAuthError = error.message && (
-                error.message.includes("Clé OpenRouter") || 
-                error.message.includes("Crédits insuffisants") ||
-                error.message.includes("L'intégration IA n'est pas configurée")
-            );
-            if (isAuthError) {
+            if (!shouldRetryOpenRouterError(error)) {
                 throw error;
             }
             

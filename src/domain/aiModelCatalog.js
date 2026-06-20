@@ -165,6 +165,7 @@ function normalizeOpenRouterModel(model, modelsDevModels = {}, modelsDevCatalog 
     maxCompletionTokens,
     pricing: model.pricing || null,
     architecture: normalizeArchitecture(model, modelsDevEntry),
+    expirationDate: model.expiration_date || model.expirationDate || null,
     topProvider: model.top_provider || null,
     perRequestLimits: model.per_request_limits || null,
     supportedParameters: inferSupportedParameters(model, modelsDevEntry),

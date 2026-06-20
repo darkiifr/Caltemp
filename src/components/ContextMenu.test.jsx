@@ -1,5 +1,5 @@
-import { fireEvent, render, screen } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ContextMenu from './ContextMenu';
 
 vi.mock('@tauri-apps/plugin-process', () => ({
@@ -20,6 +20,10 @@ describe('ContextMenu', () => {
     vi.clearAllMocks();
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 320 });
     Object.defineProperty(window, 'innerHeight', { configurable: true, value: 240 });
+  });
+
+  afterEach(() => {
+    cleanup();
   });
 
   it('keeps the desktop context menu inside the viewport', () => {

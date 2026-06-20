@@ -231,6 +231,40 @@ function buildDexterCalendarContext(events = [], settings = {}) {
     return `Rappels à venir dans Caltemp (${upcoming.length}/${events.length} affichés, triés par date) :\n${lines.join('\n')}`;
 }
 
+function getDexterContextTerms(input = '') {
+    return input
+        .toLocaleLowerCase('fr-FR')
+        .normalize('NFD')
+        .replace(/\p{Diacritic}/gu, '')
+        .replace(/[^\p{Letter}\p{Number}\s-]/gu, ' ')
+        .split(/\s+/)
+        .map(term => term.trim())
+        .filter(term => term.length >= 3);
+}
+
+function filterDexterContextEvents(events = [], input = '') {
+    const terms = getDexterContextTerms(input);
+    if (!terms.length) return events;
+    const normalizedEvents = events.map(event => ({
+        event,
+        text: [
+            event?.title,
+            event?.description,
+            event?.category,
+            ...(Array.isArray(event?.tags) ? event.tags : []),
+        ]
+            .filter(Boolean)
+            .join(' ')
+            .toLocaleLowerCase('fr-FR')
+            .normalize('NFD')
+            .replace(/\p{Diacritic}/gu, ''),
+    }));
+    const matching = normalizedEvents
+        .filter(item => terms.some(term => item.text.includes(term)))
+        .map(item => item.event);
+    return matching.length ? matching : events;
+}
+
 export default function Dexter({ onClose, settings, events = [], onAddEvent, onOpenSettingsTab, onExportPng, onExportPdf }) {
     const initialHistoryRef = useRef(null);
     if (!initialHistoryRef.current) initialHistoryRef.current = loadDexterHistoryState();
@@ -386,6 +420,7 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent, onO
         const aiAvailable = settings?.aiEnabled !== false && isAiConfigured();
         const useLocalCommand = shouldUseLocalDexterCommand({
             source: options.source || 'typed',
+            text: cleanValue,
             aiEnabled: settings?.aiEnabled !== false,
             aiConfigured: aiAvailable,
         });
@@ -471,7 +506,8 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent, onO
                 const legendLines = Object.entries(settings?.categoryLegend || {})
                     .map(([key, meta]) => `${key}=${meta?.label || key}`)
                     .join(', ');
-                const calendarContext = buildDexterCalendarContext(eventsRef.current, settings);
+                const relevantEvents = filterDexterContextEvents(eventsRef.current, userMsg.content).slice(0, 12);
+                const calendarContext = buildDexterCalendarContext(relevantEvents, settings);
                 let systemInstruction = `Tu es Dexter, l'assistant intelligent de Caltemp. Nous sommes le ${now.toLocaleString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}. Tu aides à gérer un calendrier local, des notes, des catégories, des rappels et des imports ICS. Catégories disponibles : ${legendLines || 'cours, devoir, examen, perso, dev'}.\n\n${calendarContext}`;
                 
                 if (isSearch) systemInstruction += "\n\nINFORMATIONS TROUVÉES SUR LE WEB :\nTu dois baser ta réponse sur ces informations contextuelles. NE GÉNÈRE AUCUN JSON NI REQUÊTE DE RECHERCHE, réponds directement à l'utilisateur en langage naturel.";
@@ -487,6 +523,7 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent, onO
                 if (isSearch) {
                     const searchQuery = await generateText({
                         messages: [...history, { role: 'user', content: `Génère uniquement 1 ou 2 mots-clés de recherche très courts pour : "${userMsg.content}"` }],
+                        maxTokens: 80,
                         signal: abortControllerRef.current?.signal
                     });
                     
@@ -519,6 +556,7 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent, onO
                         messages: aiMessages,
                         context: searchContext,
                         think: isThink,
+                        maxTokens: isCanvas || isThink ? 2200 : 1200,
                         signal: abortControllerRef.current?.signal,
                         onChunk: (fullText, chunk, isFirstChunk) => {
                             if (isFirstChunk) {
