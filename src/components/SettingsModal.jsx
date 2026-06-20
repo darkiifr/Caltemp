@@ -24,6 +24,7 @@ import { isHttpsImageUrl, resolveBackgroundImageUrl } from '../utils/background'
 import { getCompatibleWindowEffect, isWindowEffectSupported, WINDOW_EFFECTS } from '../utils/windowEffects';
 import { isAiConfigured, OPENROUTER_FREE_MODEL_ID } from '../services/ai';
 import { getMostUsedAiModel, normalizeAiUsageStats } from '../domain/aiUsage';
+import { enrichUpdateWithGithubReleaseNotes } from '../domain/updateReleaseNotes';
 
 const formatUsageNumber = (value) => Number(value || 0).toLocaleString('fr-FR');
 
@@ -352,8 +353,9 @@ export default function SettingsModal({
         try {
             const update = await check();
             if (update?.available) {
+                const updateWithReleaseNotes = await enrichUpdateWithGithubReleaseNotes(update, { fetcher: tauriFetch });
                 setUpdateStatus('available');
-                setAvailableUpdate(update);
+                setAvailableUpdate(updateWithReleaseNotes);
                 setShowUpdateModal(true);
             } else {
                 setUpdateStatus('uptodate');

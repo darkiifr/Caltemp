@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { generateText, isAiConfigured, OPENROUTER_FREE_MODEL_ID } from './ai';
+import { generateText, isAiConfigured, OPENROUTER_FREE_MODEL_ID, OPENROUTER_FREE_MODEL_IDS } from './ai';
 
 function jsonResponse(payload) {
   return {
@@ -40,11 +40,74 @@ describe('AI OpenRouter service', () => {
     expect(JSON.parse(request.body).model).toBe(OPENROUTER_FREE_MODEL_ID);
     expect(listener).toHaveBeenCalledTimes(1);
     expect(listener.mock.calls[0][0].detail).toMatchObject({
-      model: OPENROUTER_FREE_MODEL_ID,
+      model: OPENROUTER_FREE_MODEL_IDS[0],
       actualModel: 'meta-llama/llama-free',
       usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
     });
     window.removeEventListener('caltemp:ai-usage', listener);
+  });
+
+  it('only tries GPT OSS 120B free and Gemma free models', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({
+      choices: [{ message: { content: 'Réponse Gemma' } }],
+    }));
+    vi.spyOn(window, 'fetch').mockImplementation(fetchMock);
+
+    await generateText({ messages: [{ role: 'user', content: 'Bonjour' }] });
+
+    expect(OPENROUTER_FREE_MODEL_ID).toBe('openai/gpt-oss-120b:free');
+    expect(OPENROUTER_FREE_MODEL_IDS).toEqual([
+      'openai/gpt-oss-120b:free',
+      'google/gemma-3-27b-it:free',
+      'google/gemma-3-12b-it:free',
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).model).toBe('openai/gpt-oss-120b:free');
+  });
+
+  it('falls back from GPT OSS 120B free to Gemma when the first model fails', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 503,
+        json: async () => ({ error: { message: 'provider down' } }),
+      })
+      .mockResolvedValueOnce(jsonResponse({
+        choices: [{ message: { content: 'Réponse Gemma' } }],
+      }));
+    vi.spyOn(window, 'fetch').mockImplementation(fetchMock);
+
+    const result = await generateText({ messages: [{ role: 'user', content: 'Bonjour' }] });
+
+    expect(result).toBe('Réponse Gemma');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).model).toBe('openai/gpt-oss-120b:free');
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body).model).toBe('google/gemma-3-27b-it:free');
+  });
+
+  it('streams the first normal chunk to Dexter immediately', async () => {
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"Salut"}}]}\n\n'));
+        controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+        controller.close();
+      },
+    });
+    vi.spyOn(window, 'fetch').mockResolvedValue({
+      ok: true,
+      body: stream,
+    });
+    const onChunk = vi.fn();
+
+    const result = await generateText({
+      messages: [{ role: 'user', content: 'Bonjour' }],
+      onChunk,
+    });
+
+    expect(result).toBe('Salut');
+    expect(onChunk).toHaveBeenCalledWith('Salut', 'Salut', true);
   });
 
   it('reports build configuration when no OpenRouter key is bundled', async () => {

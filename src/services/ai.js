@@ -1,13 +1,11 @@
 import { fetch } from '@tauri-apps/plugin-http';
 
-export const OPENROUTER_FREE_MODEL_ID = 'openrouter/free';
-
-export const FALLBACK_FREE_MODELS = [
-    'meta-llama/llama-3-8b-instruct:free',
-    'qwen/qwen-2.5-72b-instruct:free',
-    'google/gemma-2-9b-it:free',
-    'openai/gpt-oss-120b:free'
+export const OPENROUTER_FREE_MODEL_IDS = [
+    'openai/gpt-oss-120b:free',
+    'google/gemma-3-27b-it:free',
+    'google/gemma-3-12b-it:free'
 ];
+export const OPENROUTER_FREE_MODEL_ID = OPENROUTER_FREE_MODEL_IDS[0];
 
 export function getOpenRouterApiKey() {
     return import.meta.env.VITE_OPENROUTER_API_KEY?.trim() || '';
@@ -254,10 +252,7 @@ async function executeGenerateText({ modelId, messages, context, onChunk, signal
 }
 
 export async function generateText({ messages, context, onChunk, signal, think = false }) {
-    const modelsToTry = [
-        OPENROUTER_FREE_MODEL_ID,
-        ...FALLBACK_FREE_MODELS
-    ];
+    const modelsToTry = OPENROUTER_FREE_MODEL_IDS;
 
     let lastError = null;
     for (let i = 0; i < modelsToTry.length; i++) {
