@@ -338,7 +338,7 @@ export function handleLocalDexterCommand(input, context = {}) {
       handled: true,
       type: 'open-settings',
       tab: 'ai',
-      message: 'J’ouvre les réglages Intelligence artificielle pour vérifier Dexter et Free Models Router.',
+      message: 'J’ouvre les réglages Intelligence artificielle pour vérifier Dexter et le routeur gratuit.',
     };
   }
 
