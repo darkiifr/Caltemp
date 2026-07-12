@@ -22,12 +22,13 @@ describe('Dexter action parsing', () => {
   });
 
   it('extracts a valid update_event action from fenced JSON', () => {
-    const result = parseDexterAction('```json\n{"action":"update_event","data":{"id":"event-1","date":"2026-06-16T10:00:00.000Z","reminder":false}}\n```');
+    const result = parseDexterAction('```json\n{"action":"update_event","data":{"id":"event-1","date":"2026-06-16T10:00:00.000Z","category":"sport","reminder":false}}\n```');
 
     expect(result.ok).toBe(true);
     expect(result.action).toBe('update_event');
     expect(result.data).toMatchObject({
       id: 'event-1',
+      category: 'sport',
       reminder: false,
     });
   });

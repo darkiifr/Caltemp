@@ -84,15 +84,47 @@ export function normalizeIcsSources(sources = []) {
       helpUrl: source.helpUrl || '',
       defaultCategory: source.defaultCategory || 'perso',
       defaultReminder: Boolean(source.defaultReminder),
+      refreshMinutes: Number(source.refreshMinutes || 15),
+      lastSyncedAt: source.lastSyncedAt || '',
+      lastSyncStatus: source.lastSyncStatus || '',
+      lastSyncMessage: source.lastSyncMessage || '',
     });
   }
   return Array.from(byId.values()).map(source => ({
     ...source,
     defaultCategory: source.defaultCategory || 'perso',
     defaultReminder: Boolean(source.defaultReminder),
+    refreshMinutes: Number(source.refreshMinutes || 15),
+    lastSyncedAt: source.lastSyncedAt || '',
+    lastSyncStatus: source.lastSyncStatus || '',
+    lastSyncMessage: source.lastSyncMessage || '',
   }));
 }
 
 export function addIcsSource(sources, source) {
   return normalizeIcsSources([...sources, source]);
+}
+
+function getSourceUrlFingerprint(value = '') {
+  try {
+    const url = new URL(String(value || '').trim());
+    if (url.protocol !== 'https:') return '';
+    url.protocol = url.protocol.toLowerCase();
+    url.hostname = url.hostname.toLowerCase();
+    if (url.port === '443') url.port = '';
+    url.hash = '';
+    return url.toString();
+  } catch {
+    return '';
+  }
+}
+
+export function findIcsSourceByUrl(sources = [], url = '') {
+  const fingerprint = getSourceUrlFingerprint(url);
+  if (!fingerprint) return null;
+  return normalizeIcsSources(sources).find(source => getSourceUrlFingerprint(source.url || '') === fingerprint) || null;
+}
+
+export function removeIcsSource(sources = [], sourceId = '') {
+  return normalizeIcsSources(sources).filter(source => source.id !== sourceId);
 }

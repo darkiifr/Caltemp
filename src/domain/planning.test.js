@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildExamRevisionPlan,
+  buildStats,
   buildWeeklySummary,
   suggestFromHabits,
 } from './planning';
@@ -39,5 +40,25 @@ describe('planning domain', () => {
 
     expect(suggestions[0].title).toContain('Sport');
     expect(suggestions[0].reason).toContain('habitude');
+  });
+
+  it('counts imported sports events and unknown categories in weekly stats', () => {
+    const stats = buildStats([
+      {
+        title: '⚽ Mexique — Afrique du Sud',
+        date: '2026-06-16T19:00:00.000Z',
+        source: 'ics-url',
+        category: 'sport',
+      },
+      {
+        title: 'Studio',
+        date: '2026-06-17T09:00:00.000Z',
+        category: 'musique',
+      },
+    ], new Date('2026-06-16T12:00:00.000Z'));
+
+    expect(stats.byCategory.sport).toBe(1);
+    expect(stats.byCategory.musique).toBe(1);
+    expect(stats.days.reduce((sum, day) => sum + day.count, 0)).toBe(2);
   });
 });

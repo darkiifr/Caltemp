@@ -10,6 +10,7 @@ import { open as openLink } from '@tauri-apps/plugin-shell';
 import UpdateModal from './UpdateModal';
 import CustomSelect from './CustomSelect';
 import MarketplacePanel from './MarketplacePanel';
+import IcsAssistantPanel from './IcsAssistantPanel';
 import { open } from '@tauri-apps/plugin-dialog';
 import { Trash2, Volume2, VolumeX, Play, MousePointerClick, BellRing } from 'lucide-react';
 import { enable, disable, isEnabled } from '@tauri-apps/plugin-autostart';
@@ -54,6 +55,10 @@ export default function SettingsModal({
     extensionErrors = [],
     onRefreshExtensions,
     onRequestRestart,
+    onSyncIcsSource,
+    onAddAndSyncIcsSource,
+    onToggleIcsSource,
+    onRemoveIcsSource,
 }) {
     const [activeTab, setActiveTab] = useState('general');
     const [appVersion, setAppVersion] = useState('Unknown');
@@ -65,6 +70,8 @@ export default function SettingsModal({
     const [newRoutine, setNewRoutine] = useState({ title: '', category: 'perso', durationMinutes: 60 });
     const [newIcsSource, setNewIcsSource] = useState({ label: '', url: '' });
     const [icsImportDraft, setIcsImportDraft] = useState(null);
+    const [syncingIcsSourceId, setSyncingIcsSourceId] = useState('');
+    const [unsubscribeDraft, setUnsubscribeDraft] = useState(null);
     const [isSavingSettings, setIsSavingSettings] = useState(false);
     
     // Unsplash State
@@ -262,7 +269,7 @@ export default function SettingsModal({
         }
     };
 
-    const prepareIcsImport = async ({ content, sourceLabel, defaultCategory = 'perso', defaultReminder = false }) => {
+    const prepareIcsImport = async ({ content, sourceId, sourceLabel, defaultCategory = 'perso', defaultReminder = false }) => {
         const importedEvents = parseICS(content);
 
         if (importedEvents.length === 0) {
@@ -271,6 +278,7 @@ export default function SettingsModal({
         }
 
         setIcsImportDraft({
+            sourceId,
             sourceLabel,
             events: importedEvents,
             defaultCategory,
@@ -312,6 +320,7 @@ export default function SettingsModal({
             const content = await response.text();
             await prepareIcsImport({
                 content,
+                sourceId: source.id,
                 sourceLabel: source.label || url,
                 defaultCategory: source.defaultCategory || 'perso',
                 defaultReminder: Boolean(source.defaultReminder),
@@ -343,6 +352,7 @@ export default function SettingsModal({
             defaultReminder: icsImportDraft.defaultReminder,
             overridesById: icsImportDraft.overridesById,
             sourceLabel: icsImportDraft.sourceLabel,
+            sourceId: icsImportDraft.sourceId,
         });
         await message('Importation réussie !', { kind: 'info', title: 'Import' });
         setIcsImportDraft(null);
@@ -510,19 +520,97 @@ export default function SettingsModal({
         setNewCategory({ id: '', label: '', color: '#60a5fa' });
     };
 
-    const handleAddIcsSource = () => {
-        if (!newIcsSource.label.trim() || !newIcsSource.url.trim()) return;
-        handleChange('icsSources', normalizeIcsSources([
-            ...(localSettings.icsSources || []),
-            {
-                id: `custom-${Date.now()}`,
-                label: newIcsSource.label.trim(),
-                type: 'url',
-                url: newIcsSource.url.trim(),
-                enabled: true,
+    const applySyncedSourceToLocalSettings = (source) => {
+        if (!source) return;
+        const currentSources = normalizeIcsSources(localSettings.icsSources || []);
+        const sourceExists = currentSources.some(item => item.id === source.id);
+        const nextSources = sourceExists
+            ? currentSources.map(item => item.id === source.id ? source : item)
+            : normalizeIcsSources([...currentSources, source]);
+        handleChange('icsSources', nextSources);
+    };
+
+    const handleAddAndSyncIcsSource = async (source) => {
+        if (!onAddAndSyncIcsSource) {
+            return { source, error: new Error('La synchronisation ICS n’est pas disponible.') };
+        }
+        setSyncingIcsSourceId(source.id || 'new-source');
+        try {
+            const result = await onAddAndSyncIcsSource(source);
+            if (result?.source && !result?.duplicate && !result?.error) {
+                applySyncedSourceToLocalSettings(result.source);
             }
-        ]));
+            if (result?.duplicate) {
+                applySyncedSourceToLocalSettings(result.source);
+            }
+            return result;
+        } finally {
+            setSyncingIcsSourceId('');
+        }
+    };
+
+    const handleAddIcsSource = async () => {
+        if (!newIcsSource.label.trim() || !newIcsSource.url.trim()) return;
+        const result = await handleAddAndSyncIcsSource({
+            id: `custom-${Date.now()}`,
+            label: newIcsSource.label.trim(),
+            type: 'url',
+            url: newIcsSource.url.trim(),
+            enabled: true,
+            refreshMinutes: 15,
+        });
+        if (result?.duplicate) {
+            await message(`Cette URL existe déjà dans « ${result.source?.label || 'Sources ICS'} ».`, { kind: 'info', title: 'Source ICS' });
+            return;
+        }
+        if (result?.error) {
+            await message(`Impossible d’ajouter cette source : ${result.source?.lastSyncMessage || result.error.message || result.error}`, { kind: 'error', title: 'Source ICS' });
+            return;
+        }
         setNewIcsSource({ label: '', url: '' });
+    };
+
+    const handleSyncIcsSource = async (source) => {
+        if (!onSyncIcsSource || syncingIcsSourceId) return null;
+        setSyncingIcsSourceId(source.id);
+        try {
+            const result = await onSyncIcsSource(source.id, { force: true, source });
+            if (result?.source) applySyncedSourceToLocalSettings(result.source);
+            if (result?.error) {
+                await message(`Synchronisation impossible : ${result.source?.lastSyncMessage || result.error.message || result.error}`, { kind: 'error', title: 'Source ICS' });
+            }
+            return result;
+        } finally {
+            setSyncingIcsSourceId('');
+        }
+    };
+
+    const handleToggleIcsSource = async (source, enabled) => {
+        const optimisticSource = { ...source, enabled };
+        handleChange('icsSources', normalizeIcsSources(localSettings.icsSources || []).map(item => item.id === source.id ? optimisticSource : item));
+        if (!onToggleIcsSource) return;
+        setSyncingIcsSourceId(source.id);
+        try {
+            const result = await onToggleIcsSource(source.id, enabled);
+            if (result?.source) applySyncedSourceToLocalSettings(result.source);
+            if (result?.error) {
+                await message(`Synchronisation impossible : ${result.source?.lastSyncMessage || result.error.message || result.error}`, { kind: 'error', title: 'Source ICS' });
+            }
+        } finally {
+            setSyncingIcsSourceId('');
+        }
+    };
+
+    const handleRemoveIcsSource = async () => {
+        if (!unsubscribeDraft || !onRemoveIcsSource) return;
+        setSyncingIcsSourceId(unsubscribeDraft.source.id);
+        try {
+            await onRemoveIcsSource(unsubscribeDraft.source.id, { preserveEvents: unsubscribeDraft.preserveEvents });
+            handleChange('icsSources', normalizeIcsSources(localSettings.icsSources || []).filter(source => source.id !== unsubscribeDraft.source.id));
+            setUnsubscribeDraft(null);
+        } finally {
+            setSyncingIcsSourceId('');
+        }
     };
 
     if (!isOpen) return null;
@@ -1467,6 +1555,10 @@ export default function SettingsModal({
 
                                     <div className="space-y-3 pt-4 border-t border-white/5">
                                         <h4 className="text-sm font-medium text-gray-400 uppercase tracking-wider">Sources ICS</h4>
+                                        <IcsAssistantPanel
+                                            categoryOptions={categoryOptions}
+                                            onAddAndSyncSource={handleAddAndSyncIcsSource}
+                                        />
                                         <div className="divide-y divide-white/5 rounded-xl border border-white/5 bg-white/[0.025]">
                                             {normalizeIcsSources(localSettings.icsSources || []).map(source => (
                                                 <div key={source.id} className="px-3 py-2.5">
@@ -1480,6 +1572,12 @@ export default function SettingsModal({
                                                                 </span>
                                                             </div>
                                                             <div className="truncate text-[11px] text-white/35">{source.url || source.path || 'URL ICS à compléter'}</div>
+                                                            {(source.lastSyncedAt || source.lastSyncMessage) && (
+                                                                <div className={`mt-1 truncate text-[11px] ${source.lastSyncStatus === 'error' ? 'text-red-300/80' : 'text-emerald-300/75'}`}>
+                                                                    {source.lastSyncedAt ? `Synchro ${formatUsageDate(source.lastSyncedAt)}` : 'Jamais synchronisé'}
+                                                                    {source.lastSyncMessage ? ` · ${source.lastSyncMessage}` : ''}
+                                                                </div>
+                                                            )}
                                                         </div>
                                                         {source.helpUrl && (
                                                             <button
@@ -1491,22 +1589,78 @@ export default function SettingsModal({
                                                             </button>
                                                         )}
                                                         {source.url && (
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => handleImportIcsUrl(source)}
-                                                                className="shrink-0 rounded-md bg-blue-500/10 px-2 py-1 text-[11px] font-medium text-blue-200 hover:bg-blue-500/20"
-                                                            >
-                                                                Importer
-                                                            </button>
+                                                            <div className="flex shrink-0 items-center gap-1.5">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => handleImportIcsUrl(source)}
+                                                                    className="rounded-md bg-blue-500/10 px-2 py-1 text-[11px] font-medium text-blue-200 hover:bg-blue-500/20"
+                                                                >
+                                                                    Copier
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => handleSyncIcsSource(source)}
+                                                                    disabled={!source.enabled || syncingIcsSourceId === source.id}
+                                                                    className="inline-flex items-center gap-1 rounded-md bg-emerald-500/10 px-2 py-1 text-[11px] font-medium text-emerald-200 hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+                                                                >
+                                                                    <RefreshCw size={11} className={syncingIcsSourceId === source.id ? 'animate-spin' : ''} />
+                                                                    Actualiser
+                                                                </button>
+                                                                {!source.preset && (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => setUnsubscribeDraft({ source, preserveEvents: false })}
+                                                                        disabled={syncingIcsSourceId === source.id}
+                                                                        className="inline-flex items-center gap-1 rounded-md bg-red-500/10 px-2 py-1 text-[11px] font-medium text-red-200 hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+                                                                    >
+                                                                        <Trash2 size={11} />
+                                                                        Retirer
+                                                                    </button>
+                                                                )}
+                                                            </div>
                                                         )}
                                                         <input
                                                             type="checkbox"
                                                             checked={source.enabled}
-                                                            onChange={(e) => handleChange('icsSources', normalizeIcsSources(localSettings.icsSources || []).map(item => item.id === source.id ? { ...item, enabled: e.target.checked } : item))}
+                                                            disabled={syncingIcsSourceId === source.id}
+                                                            onChange={(e) => handleToggleIcsSource(source, e.target.checked)}
                                                             className="shrink-0"
                                                             aria-label={`Activer ${source.label}`}
                                                         />
                                                     </div>
+                                                    {unsubscribeDraft?.source?.id === source.id && (
+                                                        <div className="mt-3 rounded-lg border border-red-300/15 bg-red-500/10 p-3 text-xs text-red-50">
+                                                            <div className="font-medium">Se désabonner de « {source.label} » ?</div>
+                                                            <p className="mt-1 text-red-100/70">
+                                                                Par défaut, les événements importés par cette source seront retirés de l’agenda.
+                                                            </p>
+                                                            <label className="mt-3 flex items-center gap-2 text-red-50/90">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={unsubscribeDraft.preserveEvents}
+                                                                    onChange={(event) => setUnsubscribeDraft(prev => ({ ...prev, preserveEvents: event.target.checked }))}
+                                                                />
+                                                                Conserver les événements comme événements locaux
+                                                            </label>
+                                                            <div className="mt-3 flex justify-end gap-2">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setUnsubscribeDraft(null)}
+                                                                    className="rounded-md bg-white/10 px-3 py-1.5 text-xs font-medium text-white/80 hover:bg-white/15"
+                                                                >
+                                                                    Annuler
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={handleRemoveIcsSource}
+                                                                    disabled={syncingIcsSourceId === source.id}
+                                                                    className="rounded-md bg-red-500/20 px-3 py-1.5 text-xs font-medium text-red-50 hover:bg-red-500/30 disabled:cursor-not-allowed disabled:opacity-50"
+                                                                >
+                                                                    Désabonner
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    )}
                                                     {source.needsUrl && (
                                                         <input
                                                             value={source.url || ''}

@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
 import { getHolidays } from '../utils/holidays';
 import DayDetails from './DayDetails';
@@ -22,16 +22,26 @@ export default function CalendarView({ events, settings = {}, onAddEvent, onEdit
     const [view, setView] = useState('month'); // 'year', 'month', 'week', 'day', 'agenda', 'focus', 'stats'
     const [direction, setDirection] = useState('right');
     const [now, setNow] = useState(new Date());
+    const [isDocumentVisible, setIsDocumentVisible] = useState(() => typeof document === 'undefined' ? true : !document.hidden);
     const dayScrollRef = useRef(null);
 
     // Update 'now' every minute for the red line, only if the app is not hidden
     useEffect(() => {
+        const handleVisibility = () => {
+            const visible = !document.hidden;
+            setIsDocumentVisible(visible);
+            if (visible) setNow(new Date());
+        };
         const interval = setInterval(() => {
             if (!document.hidden) {
                 setNow(new Date());
             }
         }, 60000);
-        return () => clearInterval(interval);
+        document.addEventListener('visibilitychange', handleVisibility);
+        return () => {
+            clearInterval(interval);
+            document.removeEventListener('visibilitychange', handleVisibility);
+        };
     }, []);
 
     useEffect(() => {
@@ -40,13 +50,13 @@ export default function CalendarView({ events, settings = {}, onAddEvent, onEdit
 
     // Scroll to current time on view change to 'day'
     useEffect(() => {
-        if (view === 'day' && dayScrollRef.current) {
+        if (isDocumentVisible && view === 'day' && dayScrollRef.current) {
              // Scroll to 2 hours before now, or 8am if morning
              const h = now.getHours();
              const scrollInPx = Math.max(0, (h - 2) * 80); 
              dayScrollRef.current.scrollTop = scrollInPx;
         }
-    }, [view, now]);
+    }, [isDocumentVisible, view, now]);
 
     // Holidays memo (year based)
     const holidays = useMemo(() => {
@@ -74,9 +84,9 @@ export default function CalendarView({ events, settings = {}, onAddEvent, onEdit
             d1.getFullYear() === d2.getFullYear();
     };
 
-    const getEventsForDay = (date) => {
+    const getEventsForDay = useCallback((date) => {
         return getOccurrencesOnDate(events, date);
-    };
+    }, [events]);
 
     const categoryLegend = settings.categoryLegend || DEFAULT_CATEGORY_LEGEND;
 
@@ -536,8 +546,9 @@ export default function CalendarView({ events, settings = {}, onAddEvent, onEdit
         return upcoming.sort((a, b) => new Date(a.date) - new Date(b.date));
     };
 
-    const renderAgendaView = () => {
-        const agendaDays = Array.from({ length: AGENDA_WINDOW_DAYS }, (_, offset) => {
+    const agendaDays = useMemo(() => {
+        if (view !== 'agenda') return [];
+        return Array.from({ length: AGENDA_WINDOW_DAYS }, (_, offset) => {
             const date = new Date(currentDate);
             date.setHours(0, 0, 0, 0);
             date.setDate(date.getDate() + offset);
@@ -546,7 +557,9 @@ export default function CalendarView({ events, settings = {}, onAddEvent, onEdit
                 events: getEventsForDay(date).sort((a, b) => new Date(a.date) - new Date(b.date)),
             };
         }).filter(day => day.events.length > 0);
+    }, [currentDate, getEventsForDay, view]);
 
+    const renderAgendaView = () => {
         return (
             <div className="flex-1 overflow-y-auto custom-scrollbar px-4 pb-4">
                 {agendaDays.length === 0 ? (
@@ -654,13 +667,43 @@ export default function CalendarView({ events, settings = {}, onAddEvent, onEdit
         );
     };
 
-    const renderStatsView = () => {
+    const statsViewModel = useMemo(() => {
+        if (view !== 'stats') return null;
         const stats = buildStats(events, currentDate);
         const maxLoad = Math.max(1, ...stats.days.map(day => day.load));
         const totalEvents = Object.values(stats.byCategory).reduce((sum, count) => sum + count, 0);
         const totalHours = Math.round(stats.days.reduce((sum, day) => sum + day.load, 0) / 60);
         const busiestDay = stats.days.reduce((best, day) => day.load > best.load ? day : best, stats.days[0]);
         const maxCategory = Math.max(1, ...Object.values(stats.byCategory));
+        const categoryEntries = Object.entries({
+            ...categoryLegend,
+            ...Object.fromEntries(
+                Object.keys(stats.byCategory)
+                    .filter(key => !categoryLegend[key])
+                    .map(key => [key, { label: key, color: '#60a5fa' }])
+            ),
+        });
+        return { stats, maxLoad, totalEvents, totalHours, busiestDay, maxCategory, categoryEntries };
+    }, [categoryLegend, currentDate, events, view]);
+
+    const renderStatsView = () => {
+        const {
+            stats,
+            maxLoad,
+            totalEvents,
+            totalHours,
+            busiestDay,
+            maxCategory,
+            categoryEntries,
+        } = statsViewModel || {
+            stats: { days: [], byCategory: {} },
+            maxLoad: 1,
+            totalEvents: 0,
+            totalHours: 0,
+            busiestDay: { date: currentDate.toISOString(), load: 0 },
+            maxCategory: 1,
+            categoryEntries: Object.entries(categoryLegend),
+        };
         return (
             <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-6">
                 <div className="grid grid-cols-3 gap-3">
@@ -704,7 +747,7 @@ export default function CalendarView({ events, settings = {}, onAddEvent, onEdit
                 <div>
                     <h3 className="text-sm uppercase tracking-widest text-white/40 mb-3">Répartition</h3>
                     <div className="grid gap-3">
-                        {Object.entries(categoryLegend).map(([key, meta]) => (
+                        {categoryEntries.map(([key, meta]) => (
                             <div key={key} className="rounded-xl border border-white/5 bg-white/5 p-3">
                                 <div className="flex items-center justify-between gap-3">
                                     <div className="flex min-w-0 items-center gap-2">

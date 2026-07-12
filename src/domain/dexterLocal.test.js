@@ -189,4 +189,48 @@ describe('Dexter local commands', () => {
     expect(response.type).toBe('update-event');
     expect(response.event.reminder).toBe(true);
   });
+
+  it('updates the category of the referenced match locally', () => {
+    const response = handleLocalDexterCommand('mets ce match en sport', {
+      now: new Date('2026-06-18T12:00:00.000Z'),
+      referencedEventId: 'france-irak',
+      events: [
+        { id: 'france-irak', title: 'France — Irak', date: '2026-06-22T19:00:00.000Z', reminder: false, category: 'perso' },
+      ],
+      settings: {
+        categoryLegend: {
+          perso: { label: 'Perso', color: '#22c55e' },
+          sport: { label: 'Sport', color: '#14b8a6' },
+        },
+      },
+    });
+
+    expect(response.handled).toBe(true);
+    expect(response.type).toBe('update-event');
+    expect(response.event).toMatchObject({
+      id: 'france-irak',
+      category: 'sport',
+    });
+    expect(response.message).toContain('catégorie **Sport**');
+  });
+
+  it('understands "change la catégorie en Sport" for a referenced event', () => {
+    const response = handleLocalDexterCommand('change la catégorie en Sport', {
+      now: new Date('2026-06-18T12:00:00.000Z'),
+      referencedEventId: 'france-irak',
+      events: [
+        { id: 'france-irak', title: 'France — Irak', date: '2026-06-22T19:00:00.000Z', reminder: false, category: 'perso' },
+      ],
+      settings: {
+        categoryLegend: {
+          perso: { label: 'Perso', color: '#22c55e' },
+          sport: { label: 'Sport', color: '#14b8a6' },
+        },
+      },
+    });
+
+    expect(response.handled).toBe(true);
+    expect(response.type).toBe('update-event');
+    expect(response.event.category).toBe('sport');
+  });
 });

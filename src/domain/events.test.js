@@ -103,4 +103,53 @@ describe('events domain', () => {
     expect(normalized.category).toBe('musique');
     expect(normalized.color).toBe('#ec4899');
   });
+
+  it('includes sport as a default category and infers football matches', () => {
+    expect(DEFAULT_CATEGORY_LEGEND.sport).toMatchObject({
+      label: 'Sport',
+    });
+
+    const normalized = normalizeEvent({
+      title: '⚽ Mexique — Afrique du Sud',
+      date: '2026-06-11T19:00:00.000Z',
+      sourceCategories: ['M6 / beIN Sports'],
+    });
+
+    expect(normalized.category).toBe('sport');
+    expect(normalized.sourceCategories).toEqual(['M6 / beIN Sports']);
+    expect(normalized.tags).toContain('sport');
+    expect(normalized.tags).toContain('M6 / beIN Sports');
+  });
+
+  it('preserves import metadata while normalizing events', () => {
+    const normalized = normalizeEvent({
+      title: 'Match',
+      date: '2026-06-11T19:00:00.000Z',
+      source: 'ics-url',
+      importSourceId: 'world-cup',
+      importSourceLabel: 'Coupe du Monde 2026',
+      importKey: 'world-cup:match-1',
+      externalId: 'match-1',
+      sequence: 3,
+      lastModified: '2026-07-07T20:48:50.000Z',
+      location: 'Estadio Azteca',
+      url: 'https://example.com/match',
+      status: 'CONFIRMED',
+      allDay: false,
+    });
+
+    expect(normalized).toMatchObject({
+      source: 'ics-url',
+      importSourceId: 'world-cup',
+      importSourceLabel: 'Coupe du Monde 2026',
+      importKey: 'world-cup:match-1',
+      externalId: 'match-1',
+      sequence: 3,
+      lastModified: '2026-07-07T20:48:50.000Z',
+      location: 'Estadio Azteca',
+      url: 'https://example.com/match',
+      status: 'CONFIRMED',
+      allDay: false,
+    });
+  });
 });

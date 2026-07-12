@@ -6,6 +6,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { type } from '@tauri-apps/plugin-os';
 import { relaunch } from '@tauri-apps/plugin-process';
+import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import CalendarView from "./components/CalendarView";
 import EventModal from "./components/EventModal";
 import SettingsModal from "./components/SettingsModal";
@@ -26,8 +27,10 @@ import { playBubbleSound, playRingtone, playNotificationSound, configureSounds, 
 import { formatEventDate, normalizeEvent, normalizeEvents, normalizeSettings } from "./domain/events";
 import { recordAiUsage } from "./domain/aiUsage";
 import { applyIcsImportOptions } from "./domain/icsImport";
+import { findIcsSourceByUrl, normalizeIcsSources, removeIcsSource } from "./domain/icsSources";
 import { applyNotificationMarks, buildReminderNotifications, snoozeEventOccurrence } from "./domain/reminders";
 import { computeReminderCheckDelay } from "./domain/reminderScheduler";
+import { syncIcsSource, upsertIcsSourceEvents } from "./services/icsSync";
 import { exportElementAsPdf, exportElementAsPng } from "./utils/exportView";
 import { FastAverageColor } from "fast-average-color";
 import { resolveBackgroundImageUrl } from "./utils/background";
@@ -58,6 +61,8 @@ function App() {
   const eventsRef = useRef([]);
   const settingsRef = useRef({});
   const extensionManagerRef = useRef(null);
+  const icsSyncingRef = useRef(false);
+  const notifyRef = useRef(null);
 
   const [settings, setSettings] = useState({
     theme: 'dark',
@@ -75,6 +80,14 @@ function App() {
   useEffect(() => {
     settingsRef.current = settings;
   }, [settings]);
+
+  const persistSettings = useCallback(async (nextSettings) => {
+    settingsRef.current = nextSettings;
+    setSettings(nextSettings);
+    if (window.__TAURI_INTERNALS__) {
+      await saveSettings(nextSettings);
+    }
+  }, []);
 
   useEffect(() => {
     const handleAiUsage = async (event) => {
@@ -246,6 +259,10 @@ function App() {
     }
   }, [settings.notifications, settings.notificationMode]);
 
+  useEffect(() => {
+    notifyRef.current = notify;
+  }, [notify]);
+
   const refreshExtensions = useCallback(async () => {
     const store = new ExtensionStore();
     await Promise.resolve();
@@ -357,20 +374,24 @@ function App() {
   // Check for reminders dynamically to save battery when in background
   useEffect(() => {
     let timeoutId;
-    
+    let cancelled = false;
+
     const checkReminders = () => {
+      if (cancelled) return;
       const now = new Date();
-      const notifications = buildReminderNotifications(events, now);
+      const currentEvents = eventsRef.current;
+      const notifications = buildReminderNotifications(currentEvents, now);
 
       for (const notification of notifications) {
-        notify(notification.title, notification.body, notification.type, {
+        notifyRef.current?.(notification.title, notification.body, notification.type, {
           reminderItems: notification.items,
           count: notification.items?.length || 1,
         });
       }
 
-      const marked = applyNotificationMarks(events, notifications);
+      const marked = applyNotificationMarks(currentEvents, notifications);
       if (isLoaded && marked.changed) {
+        eventsRef.current = marked.events;
         setEvents(marked.events);
         saveEvents(marked.events);
       }
@@ -383,11 +404,20 @@ function App() {
       timeoutId = setTimeout(checkReminders, delay);
     };
 
-    // Initial call
-    timeoutId = setTimeout(checkReminders, 5000);
+    const scheduleSoon = () => {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(checkReminders, document.hidden ? 30000 : 5000);
+    };
 
-    return () => clearTimeout(timeoutId);
-  }, [events, isLoaded, settings, notify]);
+    scheduleSoon();
+    document.addEventListener('visibilitychange', scheduleSoon);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timeoutId);
+      document.removeEventListener('visibilitychange', scheduleSoon);
+    };
+  }, [isLoaded]);
 
   const handleAddEvent = useCallback((date) => {
     setSelectedDate(date);
@@ -419,19 +449,211 @@ function App() {
   }, [events, notify, selectedEvent, settings]);
 
   const handleImportEvents = async (importedEvents, importOptions = {}) => {
-    const knownKeys = new Set(events.map(event => event.externalId || `${event.title}:${event.date}`));
-    const preparedEvents = applyIcsImportOptions(importedEvents, importOptions);
-    const normalizedImports = normalizeEvents(preparedEvents, settings).filter(event => {
-      const key = event.externalId || `${event.title}:${event.date}`;
-      if (knownKeys.has(key)) return false;
-      knownKeys.add(key);
-      return true;
+    const sourceId = importOptions.sourceId || '';
+    const preparedEvents = applyIcsImportOptions(importedEvents, {
+      ...importOptions,
+      preferInferredCategory: Boolean(sourceId),
     });
-    const newEvents = [...events, ...normalizedImports];
+    const normalizedImports = normalizeEvents(preparedEvents, settings);
+    const newEvents = sourceId
+      ? upsertIcsSourceEvents({
+          existingEvents: events,
+          importedEvents: normalizedImports,
+          sourceId,
+          settings,
+        }).events
+      : (() => {
+          const knownKeys = new Set(events.map(event => event.externalId || `${event.title}:${event.date}`));
+          const uniqueImports = normalizedImports.filter(event => {
+            const key = event.externalId || `${event.title}:${event.date}`;
+            if (knownKeys.has(key)) return false;
+            knownKeys.add(key);
+            return true;
+          });
+          return [...events, ...uniqueImports];
+        })();
     setEvents(newEvents);
     await saveEvents(newEvents);
-    notify('Importation', `${normalizedImports.length} événements importés`, 'success');
+    notify('Importation', `${normalizedImports.length} événements importés ou actualisés`, 'success');
   };
+
+  const syncIcsSourceById = useCallback(async (sourceId, options = {}) => {
+    const fetcher = window.__TAURI_INTERNALS__ ? tauriFetch : globalThis.fetch;
+    if (typeof fetcher !== 'function') return null;
+    const sources = normalizeIcsSources(settingsRef.current.icsSources || []);
+    const source = options.source || sources.find(item => item.id === sourceId);
+    if (!source) return null;
+
+    const result = await syncIcsSource({
+      source,
+      events: eventsRef.current,
+      settings: settingsRef.current,
+      fetcher,
+      now: options.now || new Date(),
+    });
+
+    if (!result.skipped) {
+      eventsRef.current = result.events;
+      setEvents(result.events);
+      await saveEvents(result.events);
+    }
+
+    const sourceExists = sources.some(item => item.id === source.id);
+    const nextSources = sourceExists
+      ? sources.map(item => item.id === source.id ? result.source : item)
+      : normalizeIcsSources([...sources, result.source]);
+    const nextSettings = normalizeSettings({
+      ...settingsRef.current,
+      icsSources: nextSources,
+    });
+    await persistSettings(nextSettings);
+    return result;
+  }, [persistSettings]);
+
+  const addAndSyncIcsSource = useCallback(async (source) => {
+    const sources = normalizeIcsSources(settingsRef.current.icsSources || []);
+    const duplicate = findIcsSourceByUrl(sources, source.url || '');
+    if (duplicate) {
+      return {
+        duplicate: true,
+        source: duplicate,
+        stats: { added: 0, updated: 0, removed: 0 },
+      };
+    }
+
+    const sourceToSync = {
+      ...source,
+      id: source.id || `custom-${Date.now()}`,
+      type: 'url',
+      enabled: true,
+    };
+    const fetcher = window.__TAURI_INTERNALS__ ? tauriFetch : globalThis.fetch;
+    if (typeof fetcher !== 'function') {
+      return {
+        source: sourceToSync,
+        stats: { added: 0, updated: 0, removed: 0 },
+        error: new Error('Le moteur réseau ICS est indisponible.'),
+      };
+    }
+
+    const result = await syncIcsSource({
+      source: sourceToSync,
+      events: eventsRef.current,
+      settings: settingsRef.current,
+      fetcher,
+      now: new Date(),
+    });
+
+    if (result.skipped || result.error) return result;
+
+    eventsRef.current = result.events;
+    setEvents(result.events);
+    await saveEvents(result.events);
+    const nextSettings = normalizeSettings({
+      ...settingsRef.current,
+      icsSources: normalizeIcsSources([...sources, result.source]),
+    });
+    await persistSettings(nextSettings);
+    return result;
+  }, [persistSettings]);
+
+  const toggleIcsSource = useCallback(async (sourceId, enabled) => {
+    const sources = normalizeIcsSources(settingsRef.current.icsSources || []);
+    const source = sources.find(item => item.id === sourceId);
+    if (!source) return null;
+    const nextSource = { ...source, enabled: Boolean(enabled) };
+    const nextSettings = normalizeSettings({
+      ...settingsRef.current,
+      icsSources: sources.map(item => item.id === sourceId ? nextSource : item),
+    });
+    await persistSettings(nextSettings);
+    if (nextSource.enabled && nextSource.url) {
+      return syncIcsSourceById(sourceId, { force: true, source: nextSource });
+    }
+    return { source: nextSource, stats: { added: 0, updated: 0, removed: 0 }, skipped: true };
+  }, [persistSettings, syncIcsSourceById]);
+
+  const removeIcsSourceById = useCallback(async (sourceId, { preserveEvents = false } = {}) => {
+    const sources = normalizeIcsSources(settingsRef.current.icsSources || []);
+    const source = sources.find(item => item.id === sourceId);
+    if (!source) return { removedEvents: 0, preservedEvents: 0 };
+
+    let removedEvents = 0;
+    let preservedEvents = 0;
+    const nextEvents = eventsRef.current.reduce((acc, event) => {
+      if (event.source === 'ics-url' && event.importSourceId === sourceId) {
+        if (!preserveEvents) {
+          removedEvents += 1;
+          return acc;
+        }
+        preservedEvents += 1;
+        acc.push(normalizeEvent({
+          ...event,
+          source: 'local',
+          importSourceId: null,
+          importSourceLabel: '',
+          importKey: '',
+        }, settingsRef.current));
+        return acc;
+      }
+      acc.push(event);
+      return acc;
+    }, []);
+
+    eventsRef.current = nextEvents;
+    setEvents(nextEvents);
+    await saveEvents(nextEvents);
+
+    const nextSettings = normalizeSettings({
+      ...settingsRef.current,
+      icsSources: removeIcsSource(sources, sourceId),
+    });
+    await persistSettings(nextSettings);
+    notify(
+      'Source ICS',
+      preserveEvents
+        ? `${preservedEvents} événement(s) conservé(s) en local`
+        : `${removedEvents} événement(s) supprimé(s)`,
+      'success',
+    );
+    return { source, removedEvents, preservedEvents };
+  }, [persistSettings, notify]);
+
+  const syncDueIcsSources = useCallback(async ({ force = false } = {}) => {
+    if (icsSyncingRef.current) return;
+    const fetcher = window.__TAURI_INTERNALS__ ? tauriFetch : globalThis.fetch;
+    if (typeof fetcher !== 'function') return;
+    const sources = normalizeIcsSources(settingsRef.current.icsSources || [])
+      .filter(source => source.enabled && source.type === 'url' && source.url);
+    if (!sources.length) return;
+
+    icsSyncingRef.current = true;
+    try {
+      const now = new Date();
+      for (const source of sources) {
+        const refreshMs = Math.max(5, Number(source.refreshMinutes || 15)) * 60 * 1000;
+        const lastSync = source.lastSyncedAt ? new Date(source.lastSyncedAt).getTime() : 0;
+        if (!force && lastSync && now.getTime() - lastSync < refreshMs) continue;
+        await syncIcsSourceById(source.id, { now });
+      }
+    } finally {
+      icsSyncingRef.current = false;
+    }
+  }, [syncIcsSourceById]);
+
+  useEffect(() => {
+    if (!isLoaded) return;
+    syncDueIcsSources({ force: true });
+    const intervalId = setInterval(() => syncDueIcsSources(), 60000);
+    const handleVisibility = () => {
+      if (!document.hidden) syncDueIcsSources();
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [isLoaded, syncDueIcsSources]);
 
   const handleDeleteEvent = async (eventId) => {
     const updatedEvents = events.filter(e => e.id !== eventId);
@@ -729,6 +951,10 @@ function App() {
         extensionErrors={extensionErrors}
         onRefreshExtensions={refreshExtensions}
         onRequestRestart={handleRestartApp}
+        onSyncIcsSource={syncIcsSourceById}
+        onAddAndSyncIcsSource={addAndSyncIcsSource}
+        onToggleIcsSource={toggleIcsSource}
+        onRemoveIcsSource={removeIcsSourceById}
         onClose={() => {
           setPreviewSettings(null);
           // Revert window effect if needed

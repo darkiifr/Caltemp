@@ -178,7 +178,7 @@ function formatReminderLine(item, categoryLegend) {
 
 function parseCategoryEdit(input, categoryLegend) {
   const normalized = input.toLocaleLowerCase('fr-FR');
-  const match = normalized.match(/\b(?:categorie|catégorie)\s+([\p{Letter}\p{Number}-]+)/u)
+  const match = normalized.match(/\b(?:categorie|catégorie)\s+(?:en|dans|vers|sur|à|a)?\s*([\p{Letter}\p{Number}-]+)/u)
     || normalized.match(/\b(?:en|dans|vers)\s+([\p{Letter}\p{Number}-]+)\s*$/u);
   const requested = match?.[1]?.trim();
   if (!requested) return null;
