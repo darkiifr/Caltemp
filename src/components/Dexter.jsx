@@ -443,7 +443,7 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent, onO
                 const updatedEvents = await onAddEvent(localCommand.event);
                 if (Array.isArray(updatedEvents)) eventsRef.current = updatedEvents;
             }
-            const referencedEvent = localCommand.event || localCommand.data;
+            const referencedEvent = localCommand.event || (Array.isArray(localCommand.data) ? localCommand.data[0] : localCommand.data);
             if (referencedEvent?.id) {
                 referencedEventIdRef.current = referencedEvent.id;
             }
@@ -515,7 +515,7 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent, onO
 
                 const systemPrompt = {
                     role: "system",
-                    content: `${systemInstruction}\n\nDIRECTIVES IMPORTANTES:\n1. Si l'utilisateur demande une information déjà présente dans les rappels à venir ci-dessus, réponds avec ces données locales et ne dis jamais que tu n'as pas accès au calendrier.\n2. Pour créer un rappel, tu DOIS ABSOLUMENT inclure un bloc \`\`\`json avec cette structure exacte : {"action": "create_event", "data": {"title": "Titre", "date": "2026-06-06T12:00:00Z", "reminder": true}}.\n3. Pour modifier un rappel, tu DOIS inclure : {"action": "update_event", "data": {"id": "ID_ici", "title": "Nouveau", "date": "2026-06-06T12:00:00Z"}}.\n4. Si la demande de l'utilisateur nécessite de chercher des informations actualisées ou générales sur internet (météo, actualités, connaissances), tu PEUX et DOIS inclure : {"action": "search_web", "data": {"query": "mots clés de recherche courts"}}. Tu recevras ensuite les résultats dans un nouveau message pour formuler ta réponse finale.\n5. N'explique jamais les champs techniques à l'utilisateur, et ne montre pas de clés internes ou JSON dans le texte visible.\n6. Après une création ou modification, le texte visible doit être un résumé naturel avec titre, date et statut d'alerte.\n7. N'invente pas d'action dangereuse.`
+                    content: `${systemInstruction}\n\nDIRECTIVES IMPORTANTES:\n1. Si l'utilisateur demande une information déjà présente dans les rappels à venir ci-dessus, réponds avec ces données locales et ne dis jamais que tu n'as pas accès au calendrier.\n2. Pour créer un rappel, tu DOIS ABSOLUMENT inclure un bloc \`\`\`json avec cette structure exacte : {"action": "create_event", "data": {"title": "Titre", "date": "2026-06-06T12:00:00Z", "category": "perso", "reminder": true}}.\n3. Pour modifier un rappel, tu DOIS inclure les champs demandés, par exemple : {"action": "update_event", "data": {"id": "ID_ici", "title": "Nouveau", "date": "2026-06-06T12:00:00Z", "category": "sport"}}. Utilise uniquement les clés de catégories disponibles.\n4. Si la demande de l'utilisateur nécessite de chercher des informations actualisées ou générales sur internet (météo, actualités, connaissances), tu PEUX et DOIS inclure : {"action": "search_web", "data": {"query": "mots clés de recherche courts"}}. Tu recevras ensuite les résultats dans un nouveau message pour formuler ta réponse finale.\n5. N'explique jamais les champs techniques à l'utilisateur, et ne montre pas de clés internes ou JSON dans le texte visible.\n6. Après une création ou modification, le texte visible doit être un résumé naturel avec titre, date, catégorie et statut d'alerte.\n7. N'invente pas d'action dangereuse.`
                 };
 
                 // --- SEARCH PHASE ---
@@ -636,8 +636,9 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent, onO
                         dateStr = finalEvent.date;
                     }
 
+                    const categoryLabel = settings?.categoryLegend?.[finalEvent.category]?.label || finalEvent.category || 'Sans catégorie';
                     setMessages(prev => prev.map(msg =>
-                        msg.id === assistantMsgId ? { ...msg, content: `✅ **C'est noté !**\n\n**Titre :** ${finalEvent.title}\n**Date :** ${dateStr}\n**Alerte :** ${finalEvent.reminder ? 'activée' : 'désactivée'}`, isStreaming: false } : msg
+                        msg.id === assistantMsgId ? { ...msg, content: `✅ **C'est noté !**\n\n**Titre :** ${finalEvent.title}\n**Date :** ${dateStr}\n**Catégorie :** ${categoryLabel}\n**Alerte :** ${finalEvent.reminder ? 'activée' : 'désactivée'}`, isStreaming: false } : msg
                     ));
 
                     if (isSearch) setIsSearching(false);
@@ -671,8 +672,9 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent, onO
                         dateStr = finalEvent.date || dateStr;
                     }
 
+                    const categoryLabel = settings?.categoryLegend?.[finalEvent.category]?.label || finalEvent.category || 'Sans catégorie';
                     setMessages(prev => prev.map(msg =>
-                        msg.id === assistantMsgId ? { ...msg, content: `✅ **Rappel modifié.**\n\n**Titre :** ${finalEvent.title}\n**Date :** ${dateStr}\n**Alerte :** ${finalEvent.reminder ? 'activée' : 'désactivée'}`, isStreaming: false } : msg
+                        msg.id === assistantMsgId ? { ...msg, content: `✅ **Rappel modifié.**\n\n**Titre :** ${finalEvent.title}\n**Date :** ${dateStr}\n**Catégorie :** ${categoryLabel}\n**Alerte :** ${finalEvent.reminder ? 'activée' : 'désactivée'}`, isStreaming: false } : msg
                     ));
 
                     if (isSearch) setIsSearching(false);

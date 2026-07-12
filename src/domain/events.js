@@ -4,6 +4,7 @@ export const DEFAULT_CATEGORY_LEGEND = {
   examen: { label: 'Examen', color: '#ef4444' },
   perso: { label: 'Perso', color: '#22c55e' },
   dev: { label: 'Dev', color: '#a78bfa' },
+  sport: { label: 'Sport', color: '#14b8a6' },
 };
 
 import { normalizeIcsSources } from './icsSources';
@@ -44,6 +45,7 @@ const CATEGORY_KEYWORDS = [
   ['devoir', ['devoir', 'dm', 'rendu', 'à rendre', 'a rendre']],
   ['cours', ['cours', 'classe', 'td', 'tp']],
   ['dev', ['dev', 'code', 'debug', 'release', 'sprint']],
+  ['sport', ['sport', 'match', 'football', 'foot', 'coupe', 'équipe', 'equipe', 'stade', 'finale', 'mondial', '⚽']],
   ['perso', ['perso', 'sport', 'rdv', 'rendez-vous']],
 ];
 
@@ -87,7 +89,14 @@ export function normalizeEvent(event = {}, settings = {}) {
   const legend = settings.categoryLegend || DEFAULT_CATEGORY_LEGEND;
   const category = event.category || inferCategory(event.title);
   const legendEntry = legend[category] || DEFAULT_CATEGORY_LEGEND.perso;
-  const tags = Array.isArray(event.tags) ? event.tags : [category].filter(Boolean);
+  const sourceCategories = Array.isArray(event.sourceCategories)
+    ? event.sourceCategories.filter(Boolean)
+    : [];
+  const tags = Array.from(new Set([
+    ...(Array.isArray(event.tags) ? event.tags : []),
+    category,
+    ...sourceCategories,
+  ].filter(Boolean)));
 
   return {
     id: event.id || crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`,
@@ -104,10 +113,24 @@ export function normalizeEvent(event = {}, settings = {}) {
     durationMinutes: Number(event.durationMinutes || event.duration || 60),
     todos: Array.isArray(event.todos) ? event.todos : [],
     source: event.source || 'local',
+    importSourceId: event.importSourceId || null,
+    importSourceLabel: event.importSourceLabel || '',
+    importKey: event.importKey || null,
     examMeta: event.examMeta || null,
     routineId: event.routineId || null,
     originalDate: event.originalDate,
     externalId: event.externalId || event.uid || null,
+    uid: event.uid || event.externalId || null,
+    sequence: Number.isFinite(Number(event.sequence)) ? Number(event.sequence) : undefined,
+    lastModified: event.lastModified || null,
+    location: event.location || '',
+    url: event.url || '',
+    sourceCategories,
+    allDay: Boolean(event.allDay),
+    status: event.status || '',
+    transparency: event.transparency || '',
+    endDate: event.endDate || null,
+    alarms: Array.isArray(event.alarms) ? event.alarms : [],
   };
 }
 
