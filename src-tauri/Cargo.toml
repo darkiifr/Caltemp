@@ -26,7 +26,7 @@ tauri-plugin-notification = "2"
 tauri-plugin-os = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-updater = "2"
-window-vibrancy = "0.5"
+window-vibrancy = "0.6"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 discord-rich-presence = "1.1"
