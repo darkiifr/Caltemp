@@ -237,7 +237,7 @@ jobs:
       contents: read
     steps:
       - name: Validate latest.json contains installable updater assets
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           TAG_NAME: ${{ needs.bump-version.outputs.new_tag || github.ref_name }}
         with:
