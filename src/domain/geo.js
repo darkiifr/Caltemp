@@ -4,6 +4,7 @@
 export const TILE_SIZE = 256;
 export const MIN_ZOOM = 2;
 export const MAX_ZOOM = 18;
+const MAX_VISIBLE_TILES = 400;
 const MAX_LAT = 85.05112878;
 
 export function clamp(value, min, max) {
@@ -47,6 +48,12 @@ export function getVisibleTiles({ cx, cy, z, width, height, scale = 1, buffer = 
   const centerY = cy * size;
   const halfW = width / 2 / scale;
   const halfH = height / 2 / scale;
+  if (halfW * halfH > MAX_VISIBLE_TILES * TILE_SIZE * TILE_SIZE) {
+    // Safety net: never ask for more tiles than a screen can need.
+    const empty = [];
+    empty.rangeKey = `${z}:empty`;
+    return empty;
+  }
   const minX = Math.floor((centerX - halfW) / TILE_SIZE) - buffer;
   const maxX = Math.floor((centerX + halfW) / TILE_SIZE) + buffer;
   const minY = Math.max(0, Math.floor((centerY - halfH) / TILE_SIZE) - buffer);

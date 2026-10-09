@@ -51,3 +51,22 @@ describe('geocoder', () => {
     expect(await geocoder.geocode('Lille')).toMatchObject({ lat: 50.63 });
   });
 });
+
+describe('geocode query fallbacks', () => {
+  it('drops a leading place name when the full text is not found', async () => {
+    const { buildGeocodeQueries } = await import('./geocoding');
+    expect(buildGeocodeQueries('Lycée Henri-IV, 23 rue Clovis, Paris')).toEqual([
+      'Lycée Henri-IV, 23 rue Clovis, Paris',
+      '23 rue Clovis, Paris',
+    ]);
+    expect(buildGeocodeQueries('Gare de Lyon, Paris')).toEqual(['Gare de Lyon, Paris']);
+
+    const fetcher = vi.fn(async (url) => ({
+      ok: true,
+      json: async () => (url.includes('Lyc%C3%A9e') ? [] : [{ lat: '48.846', lon: '2.348' }]),
+    }));
+    const geocoder = createGeocoder({ fetcher, wait: async () => {} });
+    expect(await geocoder.geocode('Lycée Henri-IV, 23 rue Clovis, Paris')).toMatchObject({ lat: 48.846 });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+});

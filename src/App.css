@@ -447,6 +447,10 @@ body {
 }
 .caltemp-map:active { cursor: grabbing; }
 .caltemp-map-light { background-color: #e8e6e1; }
+/* Dark theme over light raster tiles: invert lightness, keep hues. */
+.caltemp-map-dark .caltemp-map-tiles {
+  filter: invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.88) saturate(0.6);
+}
 .caltemp-map-tile {
   /* Tailwind's preflight caps images at their (zero-width) layer. */
   max-width: none;

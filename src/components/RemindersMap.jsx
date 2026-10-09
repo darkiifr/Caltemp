@@ -61,9 +61,10 @@ function RemindersMap({ events, settings = {}, onEditEvent, onSettingsPatch }) {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [autoGeocode, geocoder, unresolvedKey]);
 
-    // Fit on filter changes and when the first places appear, not on every update.
     const hasItems = items.length > 0;
-    const fitKey = hasItems ? `${period}:${alertsOnly}` : '';
+    // Refit once a geocoding run is over, not on its first answer (which would
+    // zoom onto a single place).
+    const fitKey = hasItems && !geocoding ? `${period}:${alertsOnly}:${items.length}` : '';
 
     const selectedItems = useMemo(() => {
         if (!selection) return [];
