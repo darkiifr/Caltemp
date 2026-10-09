@@ -49,6 +49,7 @@ export default function SettingsModal({
     onPreview,
     events,
     onImportEvents,
+    onOpenImportWizard,
     osType,
     initialActiveTab = 'general',
     installedExtensions = [],
@@ -848,7 +849,7 @@ export default function SettingsModal({
                                                  </button>
 
                                                  <button 
-                                                    onClick={handleImportICS}
+                                                    onClick={onOpenImportWizard || handleImportICS}
                                                     className="flex-1 flex items-center gap-3 p-4 bg-white/5 hover:bg-white/10 rounded-xl transition-all group"
                                                  >
                                                     <div className="p-2 bg-blue-500/20 text-blue-400 group-hover:bg-blue-500 group-hover:text-white rounded-lg transition-colors">
@@ -856,7 +857,7 @@ export default function SettingsModal({
                                                     </div>
                                                     <div className="text-left">
                                                         <div className="font-medium text-white">Importer</div>
-                                                        <div className="text-xs text-gray-400">Format .ics</div>
+                                                        <div className="text-xs text-gray-400">{onOpenImportWizard ? 'Google, Outlook, Apple · ICS, CSV, ZIP' : 'Format .ics'}</div>
                                                     </div>
                                                  </button>
                                              </div>

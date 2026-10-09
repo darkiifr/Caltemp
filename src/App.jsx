@@ -1,5 +1,5 @@
 import React, { Suspense, lazy, useCallback, useState, useEffect, useMemo, useRef } from "react";
-import { Calendar as CalendarIcon, Settings, Bot, ListTodo } from 'lucide-react';
+import { Calendar as CalendarIcon, Settings, Bot, ListTodo, CalendarArrowDown, X } from 'lucide-react';
 import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { invoke } from '@tauri-apps/api/core';
@@ -24,6 +24,7 @@ import { playBubbleSound, playRingtone, playNotificationSound, configureSounds, 
 import { formatEventDate, normalizeEvent, normalizeEvents, normalizeSettings } from "./domain/events";
 import { recordAiUsage } from "./domain/aiUsage";
 import { applyIcsImportOptions, normalizeWebcalUrl } from "./domain/icsImport";
+import { mergeImportedEvents } from "./domain/calendarImport";
 import { addDismissedIcsKey, findIcsSourceByUrl, mergeIcsSyncState, normalizeIcsSources, removeIcsSource } from "./domain/icsSources";
 import { ICS_SYNC_CONCURRENCY, computeNextIcsSyncDelay, isIcsSourceDue, mapWithConcurrency } from "./domain/icsScheduler";
 import { applyNotificationMarks, buildReminderNotifications, snoozeEventOccurrence } from "./domain/reminders";
@@ -38,6 +39,7 @@ import { getCompatibleWindowEffect } from "./utils/windowEffects";
 const SettingsModal = lazy(() => import("./components/SettingsModal"));
 const Dexter = lazy(() => import("./components/Dexter"));
 const ExtensionGalleryModal = lazy(() => import("./components/ExtensionGalleryModal"));
+const CalendarImportWizard = lazy(() => import("./components/CalendarImportWizard"));
 const loadExportView = () => import("./utils/exportView");
 
 function getIcsFetcher() {
@@ -53,6 +55,7 @@ function App() {
   const [hasOpenedSettings, setHasOpenedSettings] = useState(false);
   if (isSettingsOpen && !hasOpenedSettings) setHasOpenedSettings(true);
   const [settingsInitialTab, setSettingsInitialTab] = useState('general');
+  const [isImportWizardOpen, setIsImportWizardOpen] = useState(false);
   const [isDexterOpen, setIsDexterOpen] = useState(false);
   const [isEventModalOpen, setIsEventModalOpen] = useState(false);
   const [isRemindersOpen, setIsRemindersOpen] = useState(false);
@@ -491,26 +494,36 @@ function App() {
     });
     const normalizedImports = normalizeEvents(preparedEvents, settings);
     const currentEvents = eventsRef.current;
-    const newEvents = sourceId
-      ? upsertIcsSourceEvents({
-          existingEvents: currentEvents,
-          importedEvents: normalizedImports,
-          sourceId,
-          settings,
-        }).events
-      : (() => {
-          const knownKeys = new Set(currentEvents.map(event => event.externalId || `${event.title}:${event.date}`));
-          const uniqueImports = normalizedImports.filter(event => {
-            const key = event.externalId || `${event.title}:${event.date}`;
-            if (knownKeys.has(key)) return false;
-            knownKeys.add(key);
-            return true;
-          });
-          return [...currentEvents, ...uniqueImports];
-        })();
+    if (sourceId) {
+      const newEvents = upsertIcsSourceEvents({
+        existingEvents: currentEvents,
+        importedEvents: normalizedImports,
+        sourceId,
+        settings,
+      }).events;
+      await commitEvents(newEvents);
+      notify('Importation', `${normalizedImports.length} événements importés ou actualisés`, 'success');
+      return { added: normalizedImports.length, updated: 0, skipped: 0 };
+    }
+
+    const { events: newEvents, stats } = mergeImportedEvents(currentEvents, normalizedImports, {
+      allowDuplicates: Boolean(importOptions.allowDuplicates),
+    });
     await commitEvents(newEvents);
-    notify('Importation', `${normalizedImports.length} événements importés ou actualisés`, 'success');
+    notify('Importation', `${stats.added} ajoutés, ${stats.updated} mis à jour`, 'success');
+    return stats;
   };
+
+  const openImportWizard = useCallback(() => {
+    setIsSettingsOpen(false);
+    setIsImportWizardOpen(true);
+  }, []);
+
+  const openIcsSubscriptions = useCallback(() => {
+    setIsImportWizardOpen(false);
+    setSettingsInitialTab('productivity');
+    setIsSettingsOpen(true);
+  }, []);
 
   /**
    * Single entry point for every subscription refresh (startup, timer, focus,
@@ -846,6 +859,16 @@ function App() {
     };
   }, [handleAddEvent]);
 
+  const importCategoryOptions = useMemo(() => Object.entries(settings.categoryLegend || {}).map(([value, meta]) => ({
+    value,
+    label: meta.label,
+    color: meta.color,
+  })), [settings.categoryLegend]);
+  const showImportPrompt = isLoaded
+    && events.length === 0
+    && !settings.importPromptDismissed
+    && !isImportWizardOpen;
+
   const commandActions = useMemo(() => [
     {
       id: 'new-event',
@@ -853,12 +876,14 @@ function App() {
       run: () => handleAddEvent(new Date()),
     },
     {
-      id: 'import-ics',
-      label: 'Importer un fichier ICS',
-      run: () => {
-        setSettingsInitialTab('general');
-        setIsSettingsOpen(true);
-      },
+      id: 'import-calendar',
+      label: 'Importer depuis un autre agenda (Google, Outlook, Apple, ICS, CSV)',
+      run: openImportWizard,
+    },
+    {
+      id: 'import-subscribe',
+      label: 'S’abonner à un agenda en ligne (lien ICS)',
+      run: openIcsSubscriptions,
     },
     {
       id: 'toggle-silent',
@@ -900,7 +925,7 @@ function App() {
       },
     }))),
     ...extensionActions,
-  ], [settings, handleAddEvent, handleSaveEvent, extensionActions, handleExportPng, handleExportPdf]);
+  ], [settings, handleAddEvent, handleSaveEvent, extensionActions, handleExportPng, handleExportPdf, openImportWizard, openIcsSubscriptions]);
 
   const handleRestartApp = useCallback(async () => {
     await saveRuntimeSession({
@@ -955,6 +980,14 @@ function App() {
           </button>
 
           <div className="flex-1" />
+
+          <button
+            onClick={() => { playBubbleSound(); openImportWizard(); }}
+            className="p-3 rounded-xl hover:bg-white/10 text-white/50 hover:text-white transition-all"
+            title="Importer depuis un autre agenda"
+          >
+            <CalendarArrowDown size={24} />
+          </button>
 
           <button
             onClick={() => { playBubbleSound(); setIsDexterOpen(!isDexterOpen); }}
@@ -1015,6 +1048,43 @@ function App() {
                   onDeleteEvent={handleDeleteEvent}
                   onSettingsPatch={patchSettings}
                 />
+                {showImportPrompt && (
+                  <div className="absolute bottom-5 right-5 z-20 flex max-w-sm items-start gap-3 rounded-2xl border border-white/10 bg-[#1b1b1b]/95 p-4 shadow-2xl backdrop-blur-md">
+                    <div className="rounded-xl bg-blue-500/15 p-2 text-blue-300">
+                      <CalendarArrowDown size={20} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-medium text-white">Vous venez d’un autre agenda ?</div>
+                      <p className="mt-1 text-xs text-white/50">
+                        Importez Google Agenda, Outlook, Apple ou Proton en une minute : vos événements, catégories et rappels.
+                      </p>
+                      <div className="mt-3 flex gap-2">
+                        <button
+                          type="button"
+                          onClick={openImportWizard}
+                          className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-500"
+                        >
+                          Importer mes événements
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => patchSettings({ importPromptDismissed: true })}
+                          className="rounded-lg px-3 py-1.5 text-xs text-white/45 hover:bg-white/5 hover:text-white"
+                        >
+                          Plus tard
+                        </button>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => patchSettings({ importPromptDismissed: true })}
+                      className="rounded-lg p-1 text-white/35 hover:bg-white/10 hover:text-white"
+                      title="Masquer"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -1047,6 +1117,7 @@ function App() {
         osType={osType}
         initialActiveTab={settingsInitialTab}
         onImportEvents={handleImportEvents}
+        onOpenImportWizard={openImportWizard}
         installedExtensions={installedExtensions}
         extensionErrors={extensionErrors}
         onRefreshExtensions={refreshExtensions}
@@ -1093,6 +1164,23 @@ function App() {
         }}
       />
       </Suspense>
+      )}
+
+      {isImportWizardOpen && (
+        <Suspense fallback={null}>
+          <CalendarImportWizard
+            isOpen={isImportWizardOpen}
+            onClose={() => setIsImportWizardOpen(false)}
+            existingEvents={events}
+            categoryOptions={importCategoryOptions}
+            onImport={async (importedEvents, importOptions) => {
+              const stats = await handleImportEvents(importedEvents, importOptions);
+              if (!settingsRef.current.importPromptDismissed) patchSettings({ importPromptDismissed: true });
+              return stats;
+            }}
+            onOpenSubscriptions={openIcsSubscriptions}
+          />
+        </Suspense>
       )}
 
       <NotificationToast
