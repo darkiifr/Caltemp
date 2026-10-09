@@ -145,6 +145,7 @@ Run from repository root unless noted.
 
 ## Codebase-specific implementation notes
 - UI language/content is predominantly French; keep new user-facing text consistent.
+- Typography is **Vins Sans** (https://github.com/VinsStudio/VinsSans, OFL), bundled locally in `src/assets/fonts/vins-sans/` (WOFF2 + `OFL.txt`/`FONTLOG.txt`) and loaded from `src/main.jsx`. Use the `--caltemp-font-sans` / `--caltemp-font-mono` tokens (or Tailwind `font-sans` / `font-mono`) rather than hard-coding a family; never load fonts from a CDN. Vins Sans Pro has an `opsz` axis (`font-optical-sizing: auto`), so headings need no separate display font. To update, copy the new files from the font repo's `dist/`.
 - Several features depend on Tauri plugins and won’t behave correctly in browser-only Vite mode (notifications, fs persistence, autostart, updater, window effects, extensions install flow, Discord RPC). Prefer `npm run tauri dev` when touching these areas.
 - Do not open external browsers for internal app views or normal app flows. Caltemp is a Tauri desktop app; internal journeys must stay inside the app. External links are only acceptable when explicitly user-triggered and justified, such as opening a GitHub source/changelog.
 - The custom titlebar must keep native desktop behavior: correct Tauri drag regions (`data-tauri-drag-region`), working minimize/maximize/close controls, and no browser-first assumptions.

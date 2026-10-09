@@ -1,0 +1,51 @@
+FONTLOG for Vins Sans
+=====================
+
+Vins Sans is a modified version of Inter 4.1 (InterVariable.ttf, version 4.001),
+released under the SIL Open Font License 1.1 (see OFL.txt).
+
+Original work:   Copyright (c) 2016 The Inter Project Authors (https://github.com/rsms/inter)
+Modifications:   Copyright (c) 2026 Vins Studio (https://github.com/VinsStudio/VinsSans)
+
+The OFL declares no Reserved Font Name for Inter. The family is nevertheless
+renamed "Vins Sans" everywhere (name table, PostScript names, file names),
+the "Inter" trademark string (name ID 7) is not carried over, and "Inter"
+only appears as attribution (copyright, version and description strings).
+
+ChangeLog
+---------
+2.000 (2026-10-07)
+- Family expanded to Vins Sans Pro, Text, Display, Rounded, Compact,
+  Compact Rounded and Mono, all variable from weight 100 to 900.
+- Pro now exposes optical size 14-32 and width 75-112.5. Text and Display pin
+  the optical extremes; Rounded uses optical size 16.
+- Compressed, Condensed, Regular and Expanded width instances added to Pro,
+  Text, Display and Rounded.
+- Compact and Compact Rounded added at an internal width of 82.5. Rounded
+  companions keep the exact advances of their base families.
+- Mono added with a fixed 1230-unit cell, fitted wide glyphs, zero-width
+  combining marks and functional terminals on narrow characters.
+- CSS, interactive family laboratory and matrix-driven verification expanded
+  to all seven subfamilies, including OTS and byte-for-byte reproducibility.
+
+1.100 (2026-10-06)
+- Optical-size axis pinned at 16 for a more open, text-oriented UI texture.
+- Capital G with spur (cv10) made default in both families.
+- Vins Sans Rounded added as a second variable family (wght 100-900). Eligible
+  straight corners are replaced by subtle quadratic arcs across the variation
+  data; glyph advances, sidebearings, vertical metrics and character coverage
+  remain identical to Vins Sans.
+- CSS variables, comparison specimen and verification suite updated for both families.
+
+1.000 (2026-10-05)
+- Optical-size axis (opsz 14-32) pinned at 18; the font keeps a single wght
+  axis (100-900). No outline was redrawn: only axis pinning (fontTools
+  instancer), so glyph forms, hinting-free design and kerning come from Inter.
+- Family renamed to Vins Sans; name table rebuilt (copyright credit kept,
+  Inter trademark string dropped); fvar instances and STAT rebuilt for wght only.
+- Feature-parameter UI names (ssXX/cvXX) preserved.
+- OS/2: vendor ID VINS, fsType 0, weight class 400, USE_TYPO_METRICS kept.
+- gasp table added (smoothing at all sizes).
+- Build and verification scripts added (build.py, verify.py).
+- Option B ("signature", preview only, not shipped as VinsSans): compact f and t
+  (cv12, cv13) and round quotes/commas (ss03) made default via calt.

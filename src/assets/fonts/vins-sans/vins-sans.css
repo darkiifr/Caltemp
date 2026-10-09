@@ -1,0 +1,19 @@
+/* Vins Sans 2.000 (Vins Studio) — SIL Open Font License 1.1, voir OFL.txt.
+   Source : https://github.com/VinsStudio/VinsSans (dist/).
+   Polices embarquées dans le bundle : aucune requête réseau au démarrage. */
+@font-face {
+  font-family: "Vins Sans Pro";
+  src: url("./VinsSansPro.woff2") format("woff2");
+  font-weight: 100 900;
+  font-stretch: 75% 112.5%;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Vins Sans Mono";
+  src: url("./VinsSansMono.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}

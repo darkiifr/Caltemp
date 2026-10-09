@@ -1,7 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
-import "@fontsource-variable/geist";
+import "./assets/fonts/vins-sans/vins-sans.css";
 import "./App.css";
 
 document.documentElement.dataset.caltempWindow = 'main';
