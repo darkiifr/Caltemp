@@ -434,3 +434,35 @@ body {
     @apply font-sans;
   }
 }
+
+/* Reminders map (SlippyMap) */
+.caltemp-map {
+  background-color: #1b1d22;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+  background-size: 64px 64px;
+  cursor: grab;
+  contain: strict;
+}
+.caltemp-map:active { cursor: grabbing; }
+.caltemp-map-light { background-color: #e8e6e1; }
+.caltemp-map-tile {
+  /* Tailwind's preflight caps images at their (zero-width) layer. */
+  max-width: none;
+  opacity: 0;
+  transition: opacity 180ms ease-out;
+  image-rendering: auto;
+  user-select: none;
+}
+.caltemp-map-tile[data-loaded="1"] { opacity: 1; }
+.caltemp-map-tile[data-failed="1"] { visibility: hidden; }
+.caltemp-map-markers > .caltemp-map-marker {
+  transform: scale(var(--map-inv, 1));
+  transition: box-shadow 150ms ease;
+  cursor: pointer;
+}
+.caltemp-map-markers > .caltemp-map-marker:hover { filter: brightness(1.12); }
+@media (prefers-reduced-motion: reduce) {
+  .caltemp-map-tile { transition: none; }
+}

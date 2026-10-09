@@ -1,4 +1,4 @@
-import React, { memo, useState, useMemo, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
+import React, { Suspense, lazy, memo, useState, useMemo, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
 import { getHolidays } from '../utils/holidays';
 import DayDetails from './DayDetails';
@@ -7,6 +7,9 @@ import { getOccurrencesOnDate } from '../utils/eventUtils';
 import { buildStats } from '../domain/planning';
 import { buildOccurrenceIndex, formatEventDate, toDayKey, DEFAULT_CATEGORY_LEGEND } from '../domain/events';
 import { layoutDayEvents } from '../domain/smartScheduling';
+
+// The map (and its tile engine) is only downloaded when the view is opened.
+const RemindersMap = lazy(() => import('./RemindersMap'));
 
 const DAYS = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
 const MONTHS = [
@@ -24,6 +27,7 @@ const VIEW_OPTIONS = [
     ['agenda', 'Agenda'],
     ['focus', 'Focus'],
     ['stats', 'Stats'],
+    ['map', 'Carte'],
 ];
 const EMPTY_DAY = [];
 // Cap the stagger so long lists still settle quickly.
@@ -46,7 +50,7 @@ function getVisibleRange(view, currentDate) {
     return [new Date(y, m, d), new Date(y, m, d)];
 }
 
-function CalendarView({ events, settings = {}, onAddEvent, onEditEvent, onDeleteEvent, onViewChange, showHolidays = true, showNamedays = true }) {
+function CalendarView({ events, settings = {}, onAddEvent, onEditEvent, onDeleteEvent, onViewChange, onSettingsPatch, showHolidays = true, showNamedays = true }) {
     const [currentDate, setCurrentDate] = useState(new Date());
     const [selectedDate, setSelectedDate] = useState(new Date());
     const [view, setView] = useState('month'); // 'year', 'month', 'week', 'day', 'agenda', 'focus', 'stats'
@@ -239,6 +243,9 @@ function CalendarView({ events, settings = {}, onAddEvent, onEditEvent, onDelete
             const end = new Date(currentDate);
             end.setDate(currentDate.getDate() + FOCUS_WINDOW_DAYS - 1);
             subtitle = `Priorités du ${formatEventDate(currentDate, settings, { includeTime: false })} au ${formatEventDate(end, settings, { includeTime: false })}`;
+        } else if (view === 'map') {
+            title = 'Carte des rappels';
+            subtitle = 'Où se passent tes prochains événements';
         } else if (view === 'stats') {
             title = 'Statistiques';
             const startOfWeek = new Date(currentDate);
@@ -291,25 +298,29 @@ function CalendarView({ events, settings = {}, onAddEvent, onEditEvent, onDelete
                         ))}
                     </div>
 
-                    <button onClick={() => navigate(-1)} className="p-2 hover:bg-white/10 rounded-full transition-colors">
-                        <ChevronLeft size={20} />
-                    </button>
-                    <button
-                        onClick={() => {
-                            const now = new Date();
-                            setCurrentDate(now);
-                            setSelectedDate(now);
-                            if (view === 'day' && !isSameDay(now, currentDate)) {
-                                // Already handled by state update
-                            }
-                        }}
-                        className="px-4 py-2 text-sm font-medium bg-white/10 hover:bg-white/20 rounded-full transition-colors"
-                    >
-                        Auj.
-                    </button>
-                    <button onClick={() => navigate(1)} className="p-2 hover:bg-white/10 rounded-full transition-colors">
-                        <ChevronRight size={20} />
-                    </button>
+                    {view !== 'map' && (
+                    <>
+                        <button onClick={() => navigate(-1)} className="p-2 hover:bg-white/10 rounded-full transition-colors">
+                            <ChevronLeft size={20} />
+                        </button>
+                        <button
+                            onClick={() => {
+                                const now = new Date();
+                                setCurrentDate(now);
+                                setSelectedDate(now);
+                                if (view === 'day' && !isSameDay(now, currentDate)) {
+                                    // Already handled by state update
+                                }
+                            }}
+                            className="px-4 py-2 text-sm font-medium bg-white/10 hover:bg-white/20 rounded-full transition-colors"
+                        >
+                            Auj.
+                        </button>
+                        <button onClick={() => navigate(1)} className="p-2 hover:bg-white/10 rounded-full transition-colors">
+                            <ChevronRight size={20} />
+                        </button>
+                    </>
+                    )}
                 </div>
             </div>
         );
@@ -895,6 +906,16 @@ function CalendarView({ events, settings = {}, onAddEvent, onEditEvent, onDelete
                     {view === 'agenda' && renderAgendaView()}
                     {view === 'focus' && renderFocusView()}
                     {view === 'stats' && renderStatsView()}
+                    {view === 'map' && (
+                        <Suspense fallback={<div className="flex-1 animate-pulse rounded-xl bg-white/[0.03]" />}>
+                            <RemindersMap
+                                events={events}
+                                settings={settings}
+                                onEditEvent={onEditEvent}
+                                onSettingsPatch={onSettingsPatch}
+                            />
+                        </Suspense>
+                    )}
                 </div>
             </div>
 
@@ -903,7 +924,7 @@ function CalendarView({ events, settings = {}, onAddEvent, onEditEvent, onDelete
                 Actually, the Day View above is just a center list. 
                 Let's hide the side panel in Day View to give more space.
             */}
-            {!['day', 'agenda', 'focus', 'stats'].includes(view) && (
+            {!['day', 'agenda', 'focus', 'stats', 'map'].includes(view) && (
                 <DayDetails
                     date={selectedDate}
                     events={selectedEvents}

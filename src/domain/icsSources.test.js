@@ -27,3 +27,14 @@ describe('ICS sources', () => {
     });
   });
 });
+
+describe('ICS sync state', () => {
+  it('keeps form edits but takes the sync status from the live sources', async () => {
+    const { mergeIcsSyncState, addDismissedIcsKey } = await import('./icsSources');
+    const stale = [{ id: 'a', label: 'Renommé', url: 'https://example.com/a.ics', lastSyncedAt: '2026-01-01T00:00:00.000Z', etag: 'old' }];
+    const live = [{ id: 'a', label: 'Ancien', url: 'https://example.com/a.ics', lastSyncedAt: '2026-07-07T12:00:00.000Z', etag: 'new', dismissedKeys: ['a:1'] }];
+    const merged = mergeIcsSyncState(stale, live).find(source => source.id === 'a');
+    expect(merged).toMatchObject({ label: 'Renommé', lastSyncedAt: '2026-07-07T12:00:00.000Z', etag: 'new', dismissedKeys: ['a:1'] });
+    expect(addDismissedIcsKey(['x', 'y'], 'x')).toEqual(['y', 'x']);
+  });
+});

@@ -15,7 +15,7 @@ import ContextMenu from "./components/ContextMenu";
 import NotificationToast from "./components/NotificationToast";
 import CommandPalette from "./components/CommandPalette";
 import "./App.css";
-import { loadEvents, saveEvents, loadSettings, saveSettings } from "./services/fileManager";
+import { loadEvents, saveEventsLatest, loadSettings, saveSettings } from "./services/fileManager";
 import { ExtensionManager, ExtensionStore } from "./extensions";
 import { clearDiscordPresence, updateDiscordPresence } from "./services/discordRpc";
 import { consumeRuntimeSession, saveRuntimeSession } from "./services/runtimeSession";
@@ -23,11 +23,12 @@ import { consumeRuntimeSession, saveRuntimeSession } from "./services/runtimeSes
 import { playBubbleSound, playRingtone, playNotificationSound, configureSounds, resumeAudioContext } from "./utils/sound";
 import { formatEventDate, normalizeEvent, normalizeEvents, normalizeSettings } from "./domain/events";
 import { recordAiUsage } from "./domain/aiUsage";
-import { applyIcsImportOptions } from "./domain/icsImport";
-import { findIcsSourceByUrl, normalizeIcsSources, removeIcsSource } from "./domain/icsSources";
+import { applyIcsImportOptions, normalizeWebcalUrl } from "./domain/icsImport";
+import { addDismissedIcsKey, findIcsSourceByUrl, mergeIcsSyncState, normalizeIcsSources, removeIcsSource } from "./domain/icsSources";
+import { ICS_SYNC_CONCURRENCY, computeNextIcsSyncDelay, isIcsSourceDue, mapWithConcurrency } from "./domain/icsScheduler";
 import { applyNotificationMarks, buildReminderNotifications, snoozeEventOccurrence } from "./domain/reminders";
 import { computeReminderCheckDelay } from "./domain/reminderScheduler";
-import { syncIcsSource, upsertIcsSourceEvents } from "./services/icsSync";
+import { applyIcsFetchResult, diffEventFields, fetchIcsSource, upsertIcsSourceEvents } from "./services/icsSync";
 import { FastAverageColor } from "fast-average-color";
 import { resolveBackgroundImageUrl } from "./utils/background";
 import { getCompatibleWindowEffect } from "./utils/windowEffects";
@@ -38,6 +39,11 @@ const SettingsModal = lazy(() => import("./components/SettingsModal"));
 const Dexter = lazy(() => import("./components/Dexter"));
 const ExtensionGalleryModal = lazy(() => import("./components/ExtensionGalleryModal"));
 const loadExportView = () => import("./utils/exportView");
+
+function getIcsFetcher() {
+  const fetcher = window.__TAURI_INTERNALS__ ? tauriFetch : globalThis.fetch;
+  return typeof fetcher === 'function' ? fetcher : null;
+}
 
 function App() {
   const [events, setEvents] = useState([]);
@@ -68,7 +74,7 @@ function App() {
   const eventsRef = useRef([]);
   const settingsRef = useRef({});
   const extensionManagerRef = useRef(null);
-  const icsSyncingRef = useRef(false);
+  const icsQueueRef = useRef(Promise.resolve());
   const notifyRef = useRef(null);
 
   const [settings, setSettings] = useState({
@@ -88,6 +94,15 @@ function App() {
     settingsRef.current = settings;
   }, [settings]);
 
+  // Every event mutation goes through here: the ref is updated synchronously so
+  // concurrent async flows (ICS sync, reminders, extensions) always read the
+  // latest list, and disk writes are coalesced.
+  const commitEvents = useCallback((nextEvents) => {
+    eventsRef.current = nextEvents;
+    setEvents(nextEvents);
+    return saveEventsLatest(nextEvents);
+  }, []);
+
   const persistSettings = useCallback(async (nextSettings) => {
     settingsRef.current = nextSettings;
     setSettings(nextSettings);
@@ -95,6 +110,11 @@ function App() {
       await saveSettings(nextSettings);
     }
   }, []);
+
+  const patchSettings = useCallback((patch) => persistSettings(normalizeSettings({
+    ...settingsRef.current,
+    ...patch,
+  })).catch(error => console.error('Failed to save settings:', error)), [persistSettings]);
 
   useEffect(() => {
     const handleAiUsage = async (event) => {
@@ -166,7 +186,9 @@ function App() {
         // Configure sounds
         configureSounds(finalSettings.soundConfig || {});
 
-        setEvents(normalizeEvents(loadedEvents || [], finalSettings));
+        const initialEvents = normalizeEvents(loadedEvents || [], finalSettings);
+        eventsRef.current = initialEvents;
+        setEvents(initialEvents);
         setSettings(finalSettings);
         if (runtimeSession?.calendarView) {
           setCalendarView(runtimeSession.calendarView);
@@ -288,8 +310,7 @@ function App() {
             ...event,
           }, settingsRef.current);
           const updatedEvents = [...eventsRef.current, eventToSave];
-          setEvents(updatedEvents);
-          await saveEvents(updatedEvents);
+          await commitEvents(updatedEvents);
           manager.emit('calendar:event-created', { event: eventToSave });
           return eventToSave;
         },
@@ -298,15 +319,13 @@ function App() {
           const updatedEvents = eventsRef.current.map((item) =>
             item.id === eventToSave.id ? eventToSave : item
           );
-          setEvents(updatedEvents);
-          await saveEvents(updatedEvents);
+          await commitEvents(updatedEvents);
           manager.emit('calendar:event-updated', { event: eventToSave });
           return eventToSave;
         },
         deleteEvent: async (eventId) => {
           const updatedEvents = eventsRef.current.filter((item) => item.id !== eventId);
-          setEvents(updatedEvents);
-          await saveEvents(updatedEvents);
+          await commitEvents(updatedEvents);
           manager.emit('calendar:event-deleted', { eventId });
         },
         notify,
@@ -339,7 +358,7 @@ function App() {
     setInstalledExtensions(manager.getInstalled());
     setExtensionErrors(manager.getErrors());
     manager.emit('app:ready', { version: settingsRef.current?.version });
-  }, [notify]);
+  }, [commitEvents, notify]);
 
   useEffect(() => {
     if (!isLoaded) return;
@@ -398,9 +417,7 @@ function App() {
 
       const marked = applyNotificationMarks(currentEvents, notifications);
       if (isLoaded && marked.changed) {
-        eventsRef.current = marked.events;
-        setEvents(marked.events);
-        saveEvents(marked.events);
+        commitEvents(marked.events).catch(error => console.error('Failed to save reminder marks:', error));
       }
 
       const delay = computeReminderCheckDelay({
@@ -424,7 +441,7 @@ function App() {
       clearTimeout(timeoutId);
       document.removeEventListener('visibilitychange', scheduleSoon);
     };
-  }, [isLoaded]);
+  }, [commitEvents, isLoaded]);
 
   const handleAddEvent = useCallback((date) => {
     setSelectedDate(date);
@@ -433,15 +450,26 @@ function App() {
   }, []);
 
   const handleSaveEvent = useCallback(async (newEvent) => {
-    const normalizedEvent = normalizeEvent(newEvent, settings);
-    const existingEvent = events.find(event => event.id === normalizedEvent.id);
+    const currentEvents = eventsRef.current;
+    const existingEvent = currentEvents.find(event => event.id === newEvent.id);
+    // Editors only send the fields they show: keep everything else (source,
+    // import keys, location, geo...) so subscribed events stay linked to their feed.
+    let normalizedEvent = normalizeEvent(existingEvent ? { ...existingEvent, ...newEvent } : newEvent, settingsRef.current);
+    if (existingEvent?.source === 'ics-url') {
+      const edited = diffEventFields(existingEvent, normalizedEvent);
+      if (edited.length) {
+        normalizedEvent = {
+          ...normalizedEvent,
+          localOverrides: Array.from(new Set([...(existingEvent.localOverrides || []), ...edited])),
+        };
+      }
+    }
     const isUpdate = Boolean(selectedEvent || existingEvent);
-    const updatedEvents = isUpdate
-      ? events.map(e => e.id === normalizedEvent.id ? normalizedEvent : e)
-      : [...events, normalizedEvent];
+    const updatedEvents = existingEvent
+      ? currentEvents.map(e => e.id === normalizedEvent.id ? normalizedEvent : e)
+      : [...currentEvents, normalizedEvent];
 
-    setEvents(updatedEvents);
-    await saveEvents(updatedEvents);
+    await commitEvents(updatedEvents);
     extensionManagerRef.current?.emit(
       isUpdate ? 'calendar:event-updated' : 'calendar:event-created',
       { event: normalizedEvent }
@@ -449,11 +477,11 @@ function App() {
 
     notify(
       'Événement enregistré',
-      `${normalizedEvent.title} le ${formatEventDate(normalizedEvent.date, settings)}`,
+      `${normalizedEvent.title} le ${formatEventDate(normalizedEvent.date, settingsRef.current)}`,
       'success'
     );
     return updatedEvents;
-  }, [events, notify, selectedEvent, settings]);
+  }, [commitEvents, notify, selectedEvent]);
 
   const handleImportEvents = async (importedEvents, importOptions = {}) => {
     const sourceId = importOptions.sourceId || '';
@@ -462,60 +490,116 @@ function App() {
       preferInferredCategory: Boolean(sourceId),
     });
     const normalizedImports = normalizeEvents(preparedEvents, settings);
+    const currentEvents = eventsRef.current;
     const newEvents = sourceId
       ? upsertIcsSourceEvents({
-          existingEvents: events,
+          existingEvents: currentEvents,
           importedEvents: normalizedImports,
           sourceId,
           settings,
         }).events
       : (() => {
-          const knownKeys = new Set(events.map(event => event.externalId || `${event.title}:${event.date}`));
+          const knownKeys = new Set(currentEvents.map(event => event.externalId || `${event.title}:${event.date}`));
           const uniqueImports = normalizedImports.filter(event => {
             const key = event.externalId || `${event.title}:${event.date}`;
             if (knownKeys.has(key)) return false;
             knownKeys.add(key);
             return true;
           });
-          return [...events, ...uniqueImports];
+          return [...currentEvents, ...uniqueImports];
         })();
-    setEvents(newEvents);
-    await saveEvents(newEvents);
+    await commitEvents(newEvents);
     notify('Importation', `${normalizedImports.length} événements importés ou actualisés`, 'success');
   };
 
+  /**
+   * Single entry point for every subscription refresh (startup, timer, focus,
+   * network back online, manual button, toggle, new source).
+   *
+   * - Runs are serialised, so two syncs never interleave.
+   * - Feeds are downloaded in parallel, outside of any state snapshot.
+   * - Results are merged into the *current* events and settings once the
+   *   downloads are done, so edits made meanwhile are never rolled back.
+   * - Unchanged feeds (HTTP 304 or same content) cost no re-render and no write.
+   */
+  const runIcsSync = useCallback((pickSources, { force = false, now, extraSource = null } = {}) => {
+    const task = icsQueueRef.current.then(async () => {
+      const fetcher = getIcsFetcher();
+      const at = now || new Date();
+      const known = normalizeIcsSources(settingsRef.current.icsSources || []);
+      const targets = pickSources(extraSource ? [...known, extraSource] : known, at);
+      if (!targets.length) return [];
+      if (!fetcher) {
+        return targets.map(source => ({
+          source,
+          status: 'error',
+          stats: { added: 0, updated: 0, removed: 0 },
+          error: new Error('Le moteur réseau ICS est indisponible.'),
+        }));
+      }
+
+      const fetched = await mapWithConcurrency(targets, ICS_SYNC_CONCURRENCY, source => fetchIcsSource({
+        source,
+        events: eventsRef.current,
+        settings: settingsRef.current,
+        fetcher,
+        now: at,
+        force,
+      }));
+
+      // Merge phase: synchronous, on the latest state.
+      const liveSources = normalizeIcsSources(settingsRef.current.icsSources || []);
+      const liveIds = new Set(liveSources.map(source => source.id));
+      let nextEvents = eventsRef.current;
+      const outcomes = fetched.map((result) => {
+        const stillSubscribed = liveIds.has(result.source.id) || result.source.id === extraSource?.id;
+        // A source removed or disabled while it was downloading must not bring its events back.
+        const liveSource = liveSources.find(source => source.id === result.source.id);
+        if (!stillSubscribed || (liveSource && !liveSource.enabled && result.status === 'changed')) {
+          return { ...result, skipped: true, stats: { added: 0, updated: 0, removed: 0 } };
+        }
+        if (result.status === 'skipped') return { ...result, skipped: true, stats: { added: 0, updated: 0, removed: 0 } };
+        const applied = applyIcsFetchResult({ events: nextEvents, result, settings: settingsRef.current });
+        nextEvents = applied.events;
+        return { ...result, source: applied.source, stats: applied.stats, changed: applied.changed };
+      });
+
+      if (nextEvents !== eventsRef.current) await commitEvents(nextEvents);
+
+      const synced = outcomes.filter(outcome => !outcome.skipped).map(outcome => outcome.source);
+      if (synced.length) {
+        const current = normalizeIcsSources(settingsRef.current.icsSources || []);
+        // A new source is kept only once its first download worked.
+        const newSources = outcomes
+          .filter(outcome => outcome.source.id === extraSource?.id && outcome.status !== 'error' && !outcome.skipped)
+          .map(outcome => outcome.source)
+          .filter(source => !current.some(item => item.id === source.id));
+        const nextSettings = normalizeSettings({
+          ...settingsRef.current,
+          icsSources: mergeIcsSyncState([...current, ...newSources], synced),
+        });
+        await persistSettings(nextSettings);
+      }
+      return outcomes;
+    });
+    // Keep the queue alive whatever happens to this run.
+    icsQueueRef.current = task.catch((error) => console.error('ICS sync failed:', error));
+    return task;
+  }, [commitEvents, persistSettings]);
+
   const syncIcsSourceById = useCallback(async (sourceId, options = {}) => {
-    const fetcher = window.__TAURI_INTERNALS__ ? tauriFetch : globalThis.fetch;
-    if (typeof fetcher !== 'function') return null;
-    const sources = normalizeIcsSources(settingsRef.current.icsSources || []);
-    const source = options.source || sources.find(item => item.id === sourceId);
-    if (!source) return null;
-
-    const result = await syncIcsSource({
-      source,
-      events: eventsRef.current,
-      settings: settingsRef.current,
-      fetcher,
-      now: options.now || new Date(),
-    });
-
-    if (!result.skipped) {
-      eventsRef.current = result.events;
-      setEvents(result.events);
-      await saveEvents(result.events);
-    }
-
-    const sourceExists = sources.some(item => item.id === source.id);
-    const nextSources = sourceExists
-      ? sources.map(item => item.id === source.id ? result.source : item)
-      : normalizeIcsSources([...sources, result.source]);
-    const nextSettings = normalizeSettings({
-      ...settingsRef.current,
-      icsSources: nextSources,
-    });
-    await persistSettings(nextSettings);
-    return result;
-  }, [persistSettings]);
+    const [outcome] = await runIcsSync(
+      sources => {
+        const source = sources.find(item => item.id === sourceId);
+        if (!source) return [];
+        if (!options.source) return [source];
+        // The caller's copy may carry unsaved edits; its sync status may be stale.
+        return [mergeIcsSyncState([{ ...source, ...options.source }], [source]).find(item => item.id === sourceId)];
+      },
+      { force: options.force !== false, now: options.now },
+    );
+    return outcome || null;
+  }, [runIcsSync]);
 
   const addAndSyncIcsSource = useCallback(async (source) => {
     const sources = normalizeIcsSources(settingsRef.current.icsSources || []);
@@ -528,41 +612,22 @@ function App() {
       };
     }
 
-    const sourceToSync = {
+    const candidate = {
       ...source,
+      url: normalizeWebcalUrl(source.url),
       id: source.id || `custom-${Date.now()}`,
       type: 'url',
       enabled: true,
     };
-    const fetcher = window.__TAURI_INTERNALS__ ? tauriFetch : globalThis.fetch;
-    if (typeof fetcher !== 'function') {
-      return {
-        source: sourceToSync,
-        stats: { added: 0, updated: 0, removed: 0 },
-        error: new Error('Le moteur réseau ICS est indisponible.'),
-      };
-    }
+    const sourceToSync = normalizeIcsSources([candidate]).find(item => item.id === candidate.id);
 
-    const result = await syncIcsSource({
-      source: sourceToSync,
-      events: eventsRef.current,
-      settings: settingsRef.current,
-      fetcher,
-      now: new Date(),
-    });
-
-    if (result.skipped || result.error) return result;
-
-    eventsRef.current = result.events;
-    setEvents(result.events);
-    await saveEvents(result.events);
-    const nextSettings = normalizeSettings({
-      ...settingsRef.current,
-      icsSources: normalizeIcsSources([...sources, result.source]),
-    });
-    await persistSettings(nextSettings);
-    return result;
-  }, [persistSettings]);
+    const [outcome] = await runIcsSync(
+      () => [sourceToSync],
+      // A source whose first download fails is not saved: the user fixes the URL first.
+      { force: true, extraSource: sourceToSync },
+    );
+    return outcome || { source: sourceToSync, stats: { added: 0, updated: 0, removed: 0 }, skipped: true };
+  }, [runIcsSync]);
 
   const toggleIcsSource = useCallback(async (sourceId, enabled) => {
     const sources = normalizeIcsSources(settingsRef.current.icsSources || []);
@@ -607,9 +672,7 @@ function App() {
       return acc;
     }, []);
 
-    eventsRef.current = nextEvents;
-    setEvents(nextEvents);
-    await saveEvents(nextEvents);
+    await commitEvents(nextEvents);
 
     const nextSettings = normalizeSettings({
       ...settingsRef.current,
@@ -624,51 +687,71 @@ function App() {
       'success',
     );
     return { source, removedEvents, preservedEvents };
-  }, [persistSettings, notify]);
+  }, [commitEvents, persistSettings, notify]);
 
-  const syncDueIcsSources = useCallback(async ({ force = false } = {}) => {
-    if (icsSyncingRef.current) return;
-    const fetcher = window.__TAURI_INTERNALS__ ? tauriFetch : globalThis.fetch;
-    if (typeof fetcher !== 'function') return;
-    const sources = normalizeIcsSources(settingsRef.current.icsSources || [])
-      .filter(source => source.enabled && source.type === 'url' && source.url);
-    if (!sources.length) return;
-
-    icsSyncingRef.current = true;
-    try {
-      const now = new Date();
-      for (const source of sources) {
-        const refreshMs = Math.max(5, Number(source.refreshMinutes || 15)) * 60 * 1000;
-        const lastSync = source.lastSyncedAt ? new Date(source.lastSyncedAt).getTime() : 0;
-        if (!force && lastSync && now.getTime() - lastSync < refreshMs) continue;
-        await syncIcsSourceById(source.id, { now });
-      }
-    } finally {
-      icsSyncingRef.current = false;
-    }
-  }, [syncIcsSourceById]);
+  // Background refresh: each source follows its own interval, failing sources
+  // back off (1, 2, 4... minutes up to their interval), and a refresh is pulled
+  // forward when the window regains focus or the network comes back.
+  const syncDueIcsSources = useCallback(({ force = false } = {}) => runIcsSync(
+    (sources, now) => sources.filter(source => source.enabled && source.type === 'url' && source.url
+      && (force || isIcsSourceDue(source, now))),
+    { force: false },
+  ), [runIcsSync]);
 
   useEffect(() => {
-    if (!isLoaded) return;
-    syncDueIcsSources({ force: true });
-    const intervalId = setInterval(() => syncDueIcsSources(), 60000);
-    const handleVisibility = () => {
-      if (!document.hidden) syncDueIcsSources();
+    if (!isLoaded) return undefined;
+    let timeoutId;
+    let disposed = false;
+
+    const schedule = () => {
+      clearTimeout(timeoutId);
+      if (disposed) return;
+      const sources = normalizeIcsSources(settingsRef.current.icsSources || []);
+      const delay = computeNextIcsSyncDelay(sources, new Date(), { hidden: document.hidden });
+      timeoutId = setTimeout(tick, delay);
     };
-    document.addEventListener('visibilitychange', handleVisibility);
+    const tick = () => {
+      if (disposed) return;
+      syncDueIcsSources().finally(schedule);
+    };
+    const pullForward = () => {
+      if (document.hidden || !navigator.onLine) return;
+      clearTimeout(timeoutId);
+      syncDueIcsSources().finally(schedule);
+    };
+
+    // Startup: refresh everything once, conditionally (cheap when nothing changed).
+    syncDueIcsSources({ force: true }).finally(schedule);
+    document.addEventListener('visibilitychange', pullForward);
+    window.addEventListener('focus', pullForward);
+    window.addEventListener('online', pullForward);
     return () => {
-      clearInterval(intervalId);
-      document.removeEventListener('visibilitychange', handleVisibility);
+      disposed = true;
+      clearTimeout(timeoutId);
+      document.removeEventListener('visibilitychange', pullForward);
+      window.removeEventListener('focus', pullForward);
+      window.removeEventListener('online', pullForward);
     };
   }, [isLoaded, syncDueIcsSources]);
 
   const handleDeleteEvent = useCallback(async (eventId) => {
+    const deleted = eventsRef.current.find(e => e.id === eventId);
     const updatedEvents = eventsRef.current.filter(e => e.id !== eventId);
-    eventsRef.current = updatedEvents;
-    setEvents(updatedEvents);
-    await saveEvents(updatedEvents);
+    await commitEvents(updatedEvents);
     extensionManagerRef.current?.emit('calendar:event-deleted', { eventId });
-  }, []);
+    // Remember deleted subscription events, or the next refresh would bring them back.
+    if (deleted?.source === 'ics-url' && deleted.importSourceId && deleted.importKey) {
+      const sources = normalizeIcsSources(settingsRef.current.icsSources || []);
+      if (sources.some(source => source.id === deleted.importSourceId)) {
+        await persistSettings(normalizeSettings({
+          ...settingsRef.current,
+          icsSources: sources.map(source => source.id === deleted.importSourceId
+            ? { ...source, dismissedKeys: addDismissedIcsKey(source.dismissedKeys, deleted.importKey) }
+            : source),
+        }));
+      }
+    }
+  }, [commitEvents, persistSettings]);
 
   const handleEditEvent = useCallback((event) => {
     setSelectedEvent(event);
@@ -700,12 +783,11 @@ function App() {
   const handleToastSnooze = async (minutesOrMode) => {
     if (!toastNotification?.reminderItems?.length) return;
     const now = new Date();
-    const updatedEvents = events.map(event => {
+    const updatedEvents = eventsRef.current.map(event => {
       const item = toastNotification.reminderItems.find(reminder => reminder.event.id === event.id);
       return item ? snoozeEventOccurrence(event, item.occurrenceKey, minutesOrMode, now) : event;
     });
-    setEvents(updatedEvents);
-    await saveEvents(updatedEvents);
+    await commitEvents(updatedEvents);
     setToastNotification(null);
   };
 
@@ -931,6 +1013,7 @@ function App() {
                   onViewChange={setCalendarView}
                   onEditEvent={handleEditEvent}
                   onDeleteEvent={handleDeleteEvent}
+                  onSettingsPatch={patchSettings}
                 />
               </div>
             )}
@@ -985,8 +1068,11 @@ function App() {
         onSave={async (newSettings) => {
           const normalizedSettings = normalizeSettings({
             ...newSettings,
+            // The form's copy of the sources may predate the latest background syncs.
+            icsSources: mergeIcsSyncState(newSettings.icsSources || [], settingsRef.current.icsSources || []),
             windowEffect: getCompatibleWindowEffect(newSettings.windowEffect, osType),
           });
+          settingsRef.current = normalizedSettings;
           setSettings(normalizedSettings);
           setPreviewSettings(null);
           

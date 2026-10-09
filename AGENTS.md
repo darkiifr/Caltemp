@@ -87,6 +87,17 @@ Run from repository root unless noted.
 - Date/time picker UI is custom (`CustomDatePicker.jsx`, `CustomTimePicker.jsx`) and must remain desktop-safe. Avoid native browser date pickers.
 - List-style event management is `src/components/RemindersModal.jsx`.
 
+### 3b) ICS subscriptions (real-time sync)
+- `src/utils/ics.js` parses feeds: TZID without VTIMEZONE is resolved with `Intl`, simple RRULEs stay native (`recurrence`), richer ones (COUNT/UNTIL/INTERVAL/EXDATE/RECURRENCE-ID) are expanded over a sliding window with `externalId = UID#RECURRENCE-ID`.
+- `src/services/icsSync.js` splits a refresh into `fetchIcsSource` (network, conditional requests, content hash) and `applyIcsFetchResult` (merge). Edits to a subscribed event are recorded in `localOverrides` and survive syncs; deleted ones go to the source's `dismissedKeys`.
+- `App.jsx` `runIcsSync` serialises every refresh, downloads in parallel, then merges into the *latest* `eventsRef`/`settingsRef`. All event writes go through `commitEvents` (coalesced disk writes). Scheduling lives in `src/domain/icsScheduler.js`.
+- Sync status fields (`ICS_SYNC_STATE_FIELDS`) are owned by background syncs: merge them with `mergeIcsSyncState` instead of overwriting from a stale copy.
+
+### 3c) Reminders map
+- `src/components/SlippyMap.jsx` is a dependency-free tile map (CARTO raster tiles); pan/zoom only write CSS transforms, React re-renders when the tile set or zoom level changes. Geometry/clustering helpers are in `src/domain/geo.js`.
+- `src/components/RemindersMap.jsx` is the `map` view of `CalendarView`; `src/domain/mapItems.js` turns events into map items.
+- Positions come from `event.geo` (manual pin or ICS `GEO`), coordinates in `event.location`, then the Nominatim cache (`src/services/geocoding.js`, 1 req/s, `geocache.json`). Geocoding is opt-in (`settings.mapAutoGeocode`) or user-triggered; only the location text is sent.
+
 ### 4) Settings, import/export, and updater
 - `src/components/SettingsModal.jsx` is a high-integration component combining:
   - app settings editing

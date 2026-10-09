@@ -29,6 +29,8 @@ export const DEFAULT_SETTINGS = {
   themes: [],
   activeThemeId: 'default',
   portableDataDir: '',
+  // Sending event locations to OpenStreetMap Nominatim is opt-in.
+  mapAutoGeocode: false,
   soundConfig: {
     enabled: true,
     volume: 0.7,
@@ -131,6 +133,21 @@ export function normalizeEvent(event = {}, settings = {}) {
     transparency: event.transparency || '',
     endDate: event.endDate || null,
     alarms: Array.isArray(event.alarms) ? event.alarms : [],
+    geo: normalizeGeo(event.geo),
+    localOverrides: Array.isArray(event.localOverrides) ? event.localOverrides : [],
+  };
+}
+
+export function normalizeGeo(geo) {
+  if (!geo || typeof geo !== 'object') return null;
+  const lat = Number(geo.lat);
+  const lng = Number(geo.lng ?? geo.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+  return {
+    lat,
+    lng,
+    source: geo.source || 'manual',
+    ...(geo.label && { label: String(geo.label) }),
   };
 }
 
