@@ -5,10 +5,11 @@ import gsap from 'gsap';
 import { useGSAP } from '@gsap/react';
 import CustomSelect from './CustomSelect';
 import { isValidIcsUrl } from '../domain/icsImport';
+import { DEFAULT_ICS_REFRESH_MINUTES } from '../domain/icsSources';
 
 gsap.registerPlugin(useGSAP);
 
-const DEFAULT_REFRESH_MINUTES = 15;
+const DEFAULT_REFRESH_MINUTES = DEFAULT_ICS_REFRESH_MINUTES;
 
 export function deriveIcsAssistantState({ label = '', url = '' } = {}) {
   const normalizedUrl = url.trim();
@@ -276,8 +277,8 @@ export default function IcsAssistantPanel({
                           <Clock3 size={13} />
                           Fréquence
                         </div>
-                        <div className="grid grid-cols-3 gap-3">
-                          {[5, 15, 60].map((minutes) => {
+                        <div className="grid grid-cols-4 gap-3">
+                          {[1, 5, 15, 60].map((minutes) => {
                             const active = Number(draft.refreshMinutes) === minutes;
                             return (
                               <button

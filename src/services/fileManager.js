@@ -100,3 +100,48 @@ export async function saveSettings(settings) {
         throw error;
     }
 }
+
+// Coalesced writer: bursts of updates (ICS syncs, reminder marks, edits) end up
+// as at most one write in flight plus one pending, always of the newest state,
+// so an older snapshot can never land on disk after a newer one.
+let pendingEvents = null;
+let eventsWriteLoop = null;
+
+export function saveEventsLatest(events) {
+    pendingEvents = events;
+    if (!eventsWriteLoop) {
+        eventsWriteLoop = (async () => {
+            let lastError = null;
+            try {
+                while (pendingEvents) {
+                    const snapshot = pendingEvents;
+                    pendingEvents = null;
+                    try {
+                        await saveEvents(snapshot);
+                        lastError = null;
+                    } catch (error) {
+                        lastError = error;
+                    }
+                }
+            } finally {
+                eventsWriteLoop = null;
+            }
+            if (lastError) throw lastError;
+        })();
+    }
+    return eventsWriteLoop;
+}
+
+export async function loadDataJson(fileName, fallback = null) {
+    try {
+        const content = await readDataFile(fileName);
+        return content ? JSON.parse(content) : fallback;
+    } catch (error) {
+        console.error(`Failed to load ${fileName}:`, error);
+        return fallback;
+    }
+}
+
+export async function saveDataJson(fileName, value) {
+    await writeDataFile(fileName, JSON.stringify(value));
+}

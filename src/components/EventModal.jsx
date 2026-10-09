@@ -1,11 +1,21 @@
-import React, { useState, useEffect, useMemo, useDeferredValue } from 'react';
-import { X, Calendar, Clock, AlignLeft, Bell, Trash2, Tag, ListChecks, Plus, ChevronDown, ChevronUp, Sparkles, AlertTriangle } from 'lucide-react';
+import React, { Suspense, lazy, useState, useEffect, useMemo, useDeferredValue } from 'react';
+import { X, Calendar, Clock, AlignLeft, Bell, Trash2, Tag, ListChecks, Plus, ChevronDown, ChevronUp, Sparkles, AlertTriangle, MapPin, Search, Loader2 } from 'lucide-react';
 import CustomDatePicker from './CustomDatePicker';
 import CustomTimePicker from './CustomTimePicker';
 import CustomRecurrenceSelect from './CustomRecurrenceSelect';
-import { DEFAULT_CATEGORY_LEGEND, inferCategory } from '../domain/events';
+import { DEFAULT_CATEGORY_LEGEND, inferCategory, normalizeGeo } from '../domain/events';
 import CustomSelect from './CustomSelect';
 import { findConflicts, suggestTimeSlots } from '../domain/smartScheduling';
+import { isGeocodableLocation, parseCoordinates, project } from '../domain/geo';
+import { getGeocoder } from '../services/geocoding';
+
+const SlippyMap = lazy(() => import('./SlippyMap'));
+// Default picker view: metropolitan France.
+const toView = (lat, lng, zoom) => {
+    const { x, y } = project(lat, lng);
+    return { cx: x, cy: y, zoom };
+};
+const PICKER_DEFAULT_VIEW = toView(46.6, 2.4, 5);
 
 const toTimeString = (d) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 
@@ -23,6 +33,12 @@ export default function EventModal({ isOpen, onClose, onSave, onDelete, initialD
     const [todos, setTodos] = useState([]);
     const [newTodo, setNewTodo] = useState('');
     const [showAdvanced, setShowAdvanced] = useState(false);
+    const [location, setLocation] = useState('');
+    const [geo, setGeo] = useState(null);
+    const [showMapPicker, setShowMapPicker] = useState(false);
+    const [geoSearch, setGeoSearch] = useState({ status: 'idle', message: '' });
+    // Bumped when a search moves the pin, so the map recentres; plain clicks don't.
+    const [pickerFocus, setPickerFocus] = useState(0);
 
     const categoryLegend = settings.categoryLegend || DEFAULT_CATEGORY_LEGEND;
     const categoryOptions = Object.entries(categoryLegend).map(([key, meta]) => ({
@@ -54,6 +70,10 @@ export default function EventModal({ isOpen, onClose, onSave, onDelete, initialD
                 setDurationMinutes(initialEvent.durationMinutes || 60);
                 setTags((initialEvent.tags || []).join(', '));
                 setTodos(initialEvent.todos || []);
+                setLocation(initialEvent.location || '');
+                setGeo(normalizeGeo(initialEvent.geo));
+                setShowMapPicker(false);
+                setGeoSearch({ status: 'idle', message: '' });
                 setShowAdvanced(Boolean(
                     initialEvent.recurrence && initialEvent.recurrence !== 'none'
                     || initialEvent.category
@@ -85,6 +105,10 @@ export default function EventModal({ isOpen, onClose, onSave, onDelete, initialD
                 setDurationMinutes(60);
                 setTags('');
                 setTodos([]);
+                setLocation('');
+                setGeo(null);
+                setShowMapPicker(false);
+                setGeoSearch({ status: 'idle', message: '' });
                 setShowAdvanced(false);
             }
         } else {
@@ -124,6 +148,54 @@ export default function EventModal({ isOpen, onClose, onSave, onDelete, initialD
         });
     }, [isOpen, date, time, events, durationMinutes, initialEvent?.id]);
 
+    const handleLocationChange = (value) => {
+        setLocation(value);
+        setGeoSearch({ status: 'idle', message: '' });
+        // A pin placed by hand stays; any other position followed the old text.
+        if (geo?.source !== 'manual') setGeo(null);
+    };
+
+    const handleGeoSearch = async () => {
+        const query = location.trim();
+        const typed = parseCoordinates(query);
+        if (typed) {
+            setGeo({ lat: typed.lat, lng: typed.lng, source: 'manual' });
+            setPickerFocus(n => n + 1);
+            setShowMapPicker(true);
+            return;
+        }
+        if (!isGeocodableLocation(query)) {
+            setGeoSearch({ status: 'error', message: 'Ce lieu ne peut pas être placé sur une carte.' });
+            return;
+        }
+        setGeoSearch({ status: 'loading', message: '' });
+        try {
+            const geocoder = await getGeocoder();
+            const hit = await geocoder.geocode(query);
+            if (!hit) {
+                setGeoSearch({ status: 'error', message: 'Lieu introuvable : précise l’adresse ou clique sur la carte.' });
+                setShowMapPicker(true);
+                return;
+            }
+            setGeo({ lat: hit.lat, lng: hit.lng, source: 'geocoded', ...(hit.label && { label: hit.label }) });
+            setGeoSearch({ status: 'idle', message: '' });
+            setPickerFocus(n => n + 1);
+            setShowMapPicker(true);
+        } catch {
+            setGeoSearch({ status: 'error', message: 'Recherche impossible pour le moment.' });
+        }
+    };
+
+    // Coordinates typed in the location field count as a position too.
+    const typedPosition = useMemo(() => (geo ? null : parseCoordinates(location)), [geo, location]);
+    const position = geo || typedPosition;
+    const pickerPoints = useMemo(() => (position ? [{
+        key: 'picked',
+        ...project(position.lat, position.lng),
+        color: categoryLegend[category]?.color || '#3b82f6',
+        label: location || 'Position choisie',
+    }] : []), [position, category, categoryLegend, location]);
+
     const handleDeleteClick = () => {
         if (isDeleting) {
             if (onDelete) {
@@ -151,6 +223,8 @@ export default function EventModal({ isOpen, onClose, onSave, onDelete, initialD
             durationMinutes: Number(durationMinutes) || 60,
             tags: tags.split(',').map(tag => tag.trim()).filter(Boolean),
             todos,
+            location: location.trim(),
+            geo,
             examMeta: category === 'examen' ? { revisionPlanEnabled: true } : null,
             ...(initialEvent?.notifiedOccurrences && { notifiedOccurrences: initialEvent.notifiedOccurrences })
         });
@@ -200,6 +274,67 @@ export default function EventModal({ isOpen, onClose, onSave, onDelete, initialD
                                 onChange={(e) => setDescription(e.target.value)}
                                 className="block w-full min-h-[108px] resize-none bg-transparent pl-10 pr-4 py-4 leading-relaxed text-white placeholder-white/30 focus:outline-none"
                             />
+                        </div>
+
+                        <div className="space-y-2">
+                            <div className="flex gap-2">
+                                <div className="relative min-w-0 flex-1">
+                                    <MapPin className={`absolute left-3 top-3 ${geo ? 'text-blue-300' : 'text-white/30'}`} size={18} />
+                                    <input
+                                        type="text"
+                                        placeholder="Lieu (adresse, ville, coordonnées ou lien de carte)"
+                                        aria-label="Lieu"
+                                        value={location}
+                                        onChange={(e) => handleLocationChange(e.target.value)}
+                                        className="w-full bg-white/5 border border-white/10 rounded-xl pl-10 pr-4 py-3 text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-all"
+                                    />
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={handleGeoSearch}
+                                    disabled={!location.trim() || geoSearch.status === 'loading'}
+                                    title="Localiser ce lieu via OpenStreetMap"
+                                    aria-label="Localiser ce lieu"
+                                    className="shrink-0 rounded-xl border border-white/10 bg-white/5 px-3 text-white/70 hover:bg-white/10 hover:text-white disabled:opacity-40"
+                                >
+                                    {geoSearch.status === 'loading' ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setShowMapPicker(prev => !prev)}
+                                    aria-expanded={showMapPicker}
+                                    className={`shrink-0 rounded-xl border px-3 text-xs font-semibold transition-colors ${
+                                        showMapPicker ? 'border-blue-400/50 bg-blue-500/20 text-white' : 'border-white/10 bg-white/5 text-white/70 hover:bg-white/10 hover:text-white'
+                                    }`}
+                                >
+                                    Carte
+                                </button>
+                            </div>
+                            {geoSearch.status === 'error' && (
+                                <p className="text-xs text-amber-200/80">{geoSearch.message}</p>
+                            )}
+                            {showMapPicker && (
+                                <div className="space-y-1.5">
+                                    <Suspense fallback={<div className="h-56 animate-pulse rounded-xl bg-white/[0.04]" />}>
+                                        <SlippyMap
+                                            className="h-56 w-full rounded-xl border border-white/10"
+                                            points={pickerPoints}
+                                            fitKey={pickerFocus && geo ? `focus-${pickerFocus}` : ''}
+                                            initialView={position ? toView(position.lat, position.lng, 14) : PICKER_DEFAULT_VIEW}
+                                            theme={settings.theme === 'light' ? 'light' : 'dark'}
+                                            onMapClick={({ lat, lng }) => setGeo({ lat, lng, source: 'manual' })}
+                                        />
+                                    </Suspense>
+                                    <div className="flex items-center justify-between gap-2 text-[11px] text-white/40">
+                                        <span>{position ? `Position : ${position.lat.toFixed(5)}, ${position.lng.toFixed(5)}` : 'Clique sur la carte pour placer l’événement.'}</span>
+                                        {geo && (
+                                            <button type="button" onClick={() => setGeo(null)} className="font-medium text-white/55 hover:text-white">
+                                                Retirer la position
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     </section>
 

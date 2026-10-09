@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { syncIcsSource, upsertIcsSourceEvents } from './icsSync';
+import { applyIcsFetchResult, fetchIcsSource, hashIcsContent, syncIcsSource, upsertIcsSourceEvents } from './icsSync';
 
 describe('ICS URL sync', () => {
   it('updates existing source events, adds new events and removes missing events from the same source only', async () => {
@@ -213,5 +213,132 @@ describe('ICS URL sync', () => {
     });
 
     expect(fetcher.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+  });
+
+  const FEED = [
+    'BEGIN:VCALENDAR',
+    'BEGIN:VEVENT',
+    'UID:a',
+    'DTSTART:20260707T120000Z',
+    'SUMMARY:A',
+    'END:VEVENT',
+    'END:VCALENDAR',
+  ].join('\n');
+  const source = {
+    id: 'feed',
+    label: 'Flux',
+    type: 'url',
+    enabled: true,
+    url: 'https://example.com/feed.ics',
+  };
+  const okResponse = (body, headers = {}) => ({ ok: true, status: 200, headers: new Headers(headers), text: async () => body });
+  const now = new Date('2026-07-07T12:00:00.000Z');
+
+  it('sends HTTP validators and skips the merge on 304 Not Modified', async () => {
+    const first = await syncIcsSource({
+      source,
+      events: [],
+      fetcher: vi.fn(async () => okResponse(FEED, { etag: '"v1"', 'last-modified': 'Tue, 07 Jul 2026 10:00:00 GMT' })),
+      now,
+    });
+    expect(first.source).toMatchObject({ etag: '"v1"', contentHash: expect.any(String) });
+    expect(hashIcsContent(FEED, 'a')).not.toBe(hashIcsContent(FEED, 'b'));
+
+    const fetcher = vi.fn(async () => ({ ok: false, status: 304, headers: new Headers() }));
+    const result = await fetchIcsSource({
+      source: first.source,
+      events: first.events,
+      fetcher,
+      now: new Date('2026-07-07T12:05:00.000Z'),
+    });
+    expect(fetcher).toHaveBeenCalledWith(source.url, expect.objectContaining({
+      headers: { 'If-None-Match': '"v1"', 'If-Modified-Since': 'Tue, 07 Jul 2026 10:00:00 GMT' },
+    }));
+    expect(result.status).toBe('unchanged');
+    expect(result.source.lastSyncMessage).toContain('aucun changement');
+    const applied = applyIcsFetchResult({ events: first.events, result });
+    expect(applied.events).toBe(first.events);
+    expect(applied.changed).toBe(false);
+  });
+
+  it('treats an identical body as unchanged even without HTTP validators', async () => {
+    const first = await syncIcsSource({ source, events: [], fetcher: async () => okResponse(FEED), now });
+    const result = await fetchIcsSource({
+      source: first.source,
+      events: first.events,
+      fetcher: async () => okResponse(FEED),
+      now: new Date('2026-07-07T12:05:00.000Z'),
+    });
+    expect(result.status).toBe('unchanged');
+  });
+
+  it('re-reads everything when the source has no events yet or once a day', async () => {
+    const first = await syncIcsSource({ source, events: [], fetcher: async () => okResponse(FEED, { etag: '"v1"' }), now });
+    const fetcher = vi.fn(async () => okResponse(FEED, { etag: '"v1"' }));
+    const noEvents = await fetchIcsSource({ source: first.source, events: [], fetcher, now });
+    expect(fetcher.mock.calls[0][1].headers).toBeUndefined();
+    expect(noEvents.status).toBe('changed');
+
+    const nextDay = await fetchIcsSource({
+      source: first.source,
+      events: first.events,
+      fetcher,
+      now: new Date('2026-07-08T13:00:00.000Z'),
+    });
+    expect(nextDay.status).toBe('changed');
+  });
+
+  it('keeps unchanged events as the same objects and preserves local overrides', () => {
+    const existing = upsertIcsSourceEvents({
+      existingEvents: [],
+      importedEvents: [
+        { title: 'Cours', date: '2026-07-07T08:00:00.000Z', externalId: 'c1', importKey: 'feed:c1', importSourceId: 'feed', source: 'ics-url' },
+        { title: 'TD', date: '2026-07-08T08:00:00.000Z', externalId: 'c2', importKey: 'feed:c2', importSourceId: 'feed', source: 'ics-url' },
+      ],
+      sourceId: 'feed',
+    }).events;
+    const userEdited = { ...existing[1], reminder: true, title: 'TD (salle 12)', localOverrides: ['reminder', 'title'] };
+
+    const result = upsertIcsSourceEvents({
+      existingEvents: [existing[0], userEdited],
+      importedEvents: [
+        { title: 'Cours', date: '2026-07-07T08:00:00.000Z', externalId: 'c1', importKey: 'feed:c1', importSourceId: 'feed', source: 'ics-url' },
+        { title: 'TD', date: '2026-07-08T09:00:00.000Z', externalId: 'c2', importKey: 'feed:c2', importSourceId: 'feed', source: 'ics-url', reminder: false },
+      ],
+      sourceId: 'feed',
+    });
+
+    expect(result.events[0]).toBe(existing[0]);
+    expect(result.events[1]).toMatchObject({
+      id: existing[1].id,
+      title: 'TD (salle 12)',
+      reminder: true,
+      date: '2026-07-08T09:00:00.000Z',
+    });
+    expect(result.stats).toEqual({ added: 0, updated: 1, removed: 0 });
+  });
+
+  it('does not bring back events the user deleted from a subscription', async () => {
+    const result = await syncIcsSource({
+      source: { ...source, dismissedKeys: ['feed:a'] },
+      events: [],
+      fetcher: async () => okResponse(FEED),
+      now,
+    });
+    expect(result.events).toHaveLength(0);
+  });
+
+  it('accepts webcal:// subscription links', async () => {
+    const fetcher = vi.fn(async () => okResponse(FEED));
+    const result = await syncIcsSource({ source: { ...source, url: 'webcal://example.com/feed.ics' }, events: [], fetcher, now });
+    expect(fetcher).toHaveBeenCalledWith('https://example.com/feed.ics', expect.anything());
+    expect(result.events).toHaveLength(1);
+  });
+
+  it('counts consecutive failures for backoff', async () => {
+    const failing = async () => { throw new Error('offline'); };
+    const once = await fetchIcsSource({ source, events: [], fetcher: failing, now });
+    const twice = await fetchIcsSource({ source: once.source, events: [], fetcher: failing, now });
+    expect(twice.source).toMatchObject({ lastSyncStatus: 'error', failureCount: 2 });
   });
 });

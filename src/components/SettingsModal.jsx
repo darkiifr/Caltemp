@@ -19,7 +19,7 @@ import { copyCustomSoundToAppData, getSoundDisplayName } from '../utils/soundFil
 import { generateICS, parseICS } from '../utils/ics';
 import { writeTextFile, readTextFile } from '@tauri-apps/plugin-fs';
 import { DEFAULT_CATEGORY_LEGEND, normalizeSettings } from '../domain/events';
-import { normalizeIcsSources } from '../domain/icsSources';
+import { DEFAULT_ICS_REFRESH_MINUTES, mergeIcsSyncState, normalizeIcsSources } from '../domain/icsSources';
 import { buildImportEventKey, isValidIcsUrl } from '../domain/icsImport';
 import { isHttpsImageUrl, resolveBackgroundImageUrl } from '../utils/background';
 import { getCompatibleWindowEffect, isWindowEffectSupported, WINDOW_EFFECTS } from '../utils/windowEffects';
@@ -188,7 +188,19 @@ export default function SettingsModal({
                         });
                 });
         }
-    }, [initialActiveTab, isOpen, settings]);
+        // Re-initialise only when the panel opens: background updates of
+        // `settings` (ICS syncs, AI usage...) must not wipe unsaved edits.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [initialActiveTab, isOpen]);
+
+    // Live ICS sync status still flows into the open form.
+    useEffect(() => {
+        if (!isOpen) return;
+        setLocalSettings(prev => ({
+            ...prev,
+            icsSources: mergeIcsSyncState(prev.icsSources || [], settings.icsSources || []),
+        }));
+    }, [isOpen, settings.icsSources]);
 
     const handleChange = (key, value) => {
         if (key === 'windowEffect' && !isWindowEffectSupported(value, osType)) return;
@@ -557,7 +569,7 @@ export default function SettingsModal({
             type: 'url',
             url: newIcsSource.url.trim(),
             enabled: true,
-            refreshMinutes: 15,
+            refreshMinutes: DEFAULT_ICS_REFRESH_MINUTES,
         });
         if (result?.duplicate) {
             await message(`Cette URL existe déjà dans « ${result.source?.label || 'Sources ICS'} ».`, { kind: 'info', title: 'Source ICS' });

@@ -66,7 +66,7 @@ describe('IcsAssistantPanel', () => {
         url: 'https://coupedumonde2026.net/api/calendrier-ical?filter=all',
         enabled: true,
         type: 'url',
-        refreshMinutes: 15,
+        refreshMinutes: 5,
       }));
     });
     expect(await screen.findByText(/source ajoutée/i)).toBeInTheDocument();

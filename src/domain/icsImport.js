@@ -27,8 +27,13 @@ function isBlockedHost(hostname = '') {
     || isPrivateIpv4(host);
 }
 
+// Apple/Outlook "subscribe" links use webcal://, which is plain HTTPS underneath.
+export function normalizeWebcalUrl(value = '') {
+  return String(value || '').trim().replace(/^webcals?:\/\//i, 'https://');
+}
+
 export function validateIcsUrl(value = '') {
-  const raw = String(value || '').trim();
+  const raw = normalizeWebcalUrl(value);
   if (!raw) {
     return { ok: false, normalizedUrl: '', reason: 'URL manquante.' };
   }
