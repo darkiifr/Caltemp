@@ -93,6 +93,11 @@ Run from repository root unless noted.
 - `App.jsx` `runIcsSync` serialises every refresh, downloads in parallel, then merges into the *latest* `eventsRef`/`settingsRef`. All event writes go through `commitEvents` (coalesced disk writes). Scheduling lives in `src/domain/icsScheduler.js`.
 - Sync status fields (`ICS_SYNC_STATE_FIELDS`) are owned by background syncs: merge them with `mergeIcsSyncState` instead of overwriting from a stale copy.
 
+### 3b-bis) Import from other calendars
+- `src/components/CalendarImportWizard.jsx` (opened from the sidebar, Settings › Données, the command palette, and the first-run prompt shown while there are no events) guides the user per provider (Google, Outlook, Apple, Proton, Thunderbird).
+- `src/services/calendarImportFiles.js` reads picked/dropped files or pasted text: `.ics/.ical/.vcs`, `.csv` (Google/Outlook, FR/EN headers, UTF-8 or Windows-1252) and `.zip` (Google export, read by `src/utils/zip.js`).
+- `src/domain/calendarImport.js` holds CSV parsing, provider detection, duplicate analysis (`new`/`update`/`duplicate`) and `mergeImportedEvents`, used by `App.jsx` `handleImportEvents` for one-shot imports. Updates keep the user's category/reminder/todos and never touch subscription-owned events.
+
 ### 3c) Reminders map
 - `src/components/SlippyMap.jsx` is a dependency-free tile map (free OpenStreetMap raster tiles, see `src/domain/mapTiles.js`; dark theme = CSS filter). CARTO basemaps now require an API key: do not use them; pan/zoom only write CSS transforms, React re-renders when the tile set or zoom level changes. Geometry/clustering helpers are in `src/domain/geo.js`.
 - `src/components/RemindersMap.jsx` is the `map` view of `CalendarView`; `src/domain/mapItems.js` turns events into map items.
