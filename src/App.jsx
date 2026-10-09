@@ -1,4 +1,4 @@
-import React, { useCallback, useState, useEffect, useMemo, useRef } from "react";
+import React, { Suspense, lazy, useCallback, useState, useEffect, useMemo, useRef } from "react";
 import { Calendar as CalendarIcon, Settings, Bot, ListTodo } from 'lucide-react';
 import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -9,14 +9,11 @@ import { relaunch } from '@tauri-apps/plugin-process';
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import CalendarView from "./components/CalendarView";
 import EventModal from "./components/EventModal";
-import SettingsModal from "./components/SettingsModal";
 import RemindersModal from "./components/RemindersModal";
-import Dexter from "./components/Dexter";
 import Titlebar from "./components/Titlebar";
 import ContextMenu from "./components/ContextMenu";
 import NotificationToast from "./components/NotificationToast";
 import CommandPalette from "./components/CommandPalette";
-import ExtensionGalleryModal from "./components/ExtensionGalleryModal";
 import "./App.css";
 import { loadEvents, saveEvents, loadSettings, saveSettings } from "./services/fileManager";
 import { ExtensionManager, ExtensionStore } from "./extensions";
@@ -31,14 +28,24 @@ import { findIcsSourceByUrl, normalizeIcsSources, removeIcsSource } from "./doma
 import { applyNotificationMarks, buildReminderNotifications, snoozeEventOccurrence } from "./domain/reminders";
 import { computeReminderCheckDelay } from "./domain/reminderScheduler";
 import { syncIcsSource, upsertIcsSourceEvents } from "./services/icsSync";
-import { exportElementAsPdf, exportElementAsPng } from "./utils/exportView";
 import { FastAverageColor } from "fast-average-color";
 import { resolveBackgroundImageUrl } from "./utils/background";
 import { getCompatibleWindowEffect } from "./utils/windowEffects";
 
+// Heavy, on-demand surfaces are split out of the startup bundle: they are only
+// downloaded and parsed the first time the user opens them.
+const SettingsModal = lazy(() => import("./components/SettingsModal"));
+const Dexter = lazy(() => import("./components/Dexter"));
+const ExtensionGalleryModal = lazy(() => import("./components/ExtensionGalleryModal"));
+const loadExportView = () => import("./utils/exportView");
+
 function App() {
   const [events, setEvents] = useState([]);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  // Settings is lazy-loaded on first open, then kept mounted so in-flight work
+  // (update download, ICS import) survives closing the panel.
+  const [hasOpenedSettings, setHasOpenedSettings] = useState(false);
+  if (isSettingsOpen && !hasOpenedSettings) setHasOpenedSettings(true);
   const [settingsInitialTab, setSettingsInitialTab] = useState('general');
   const [isDexterOpen, setIsDexterOpen] = useState(false);
   const [isEventModalOpen, setIsEventModalOpen] = useState(false);
@@ -655,12 +662,18 @@ function App() {
     };
   }, [isLoaded, syncDueIcsSources]);
 
-  const handleDeleteEvent = async (eventId) => {
-    const updatedEvents = events.filter(e => e.id !== eventId);
+  const handleDeleteEvent = useCallback(async (eventId) => {
+    const updatedEvents = eventsRef.current.filter(e => e.id !== eventId);
+    eventsRef.current = updatedEvents;
     setEvents(updatedEvents);
     await saveEvents(updatedEvents);
     extensionManagerRef.current?.emit('calendar:event-deleted', { eventId });
-  };
+  }, []);
+
+  const handleEditEvent = useCallback((event) => {
+    setSelectedEvent(event);
+    setIsEventModalOpen(true);
+  }, []);
 
   const handleContextMenu = (e) => {
     e.preventDefault();
@@ -698,6 +711,7 @@ function App() {
 
   const handleExportPng = useCallback(async () => {
     try {
+      const { exportElementAsPng } = await loadExportView();
       await exportElementAsPng(calendarExportRef.current, 'caltemp.png');
       notify('Export PNG', 'La vue calendrier a été exportée.', 'success');
     } catch (error) {
@@ -708,6 +722,7 @@ function App() {
 
   const handleExportPdf = useCallback(async () => {
     try {
+      const { exportElementAsPdf } = await loadExportView();
       await exportElementAsPdf(calendarExportRef.current, 'caltemp.pdf');
       notify('Export PDF', 'La vue calendrier a été exportée.', 'success');
     } catch (error) {
@@ -890,6 +905,7 @@ function App() {
           }`}>
             
             {isDexterOpen ? (
+              <Suspense fallback={<div className="flex-1" />}>
               <Dexter
                 isOpen={isDexterOpen}
                 onClose={() => setIsDexterOpen(false)}
@@ -903,6 +919,7 @@ function App() {
                 onExportPng={handleExportPng}
                 onExportPdf={handleExportPdf}
               />
+              </Suspense>
             ) : (
               <div ref={calendarExportRef} className="flex-1 flex flex-col overflow-hidden relative transition-all duration-300">
                 <CalendarView
@@ -912,10 +929,7 @@ function App() {
                   showNamedays={currentSettings.showNamedays !== false}
                   onAddEvent={handleAddEvent}
                   onViewChange={setCalendarView}
-                  onEditEvent={(event) => {
-                    setSelectedEvent(event);
-                    setIsEventModalOpen(true);
-                  }}
+                  onEditEvent={handleEditEvent}
                   onDeleteEvent={handleDeleteEvent}
                 />
               </div>
@@ -939,8 +953,11 @@ function App() {
         initialDate={selectedDate}
         initialEvent={selectedEvent}
         settings={currentSettings}
+        events={events}
       />
 
+      {hasOpenedSettings && (
+      <Suspense fallback={null}>
       <SettingsModal
         isOpen={isSettingsOpen}
         events={events}
@@ -989,6 +1006,8 @@ function App() {
           setIsSettingsOpen(false);
         }}
       />
+      </Suspense>
+      )}
 
       <NotificationToast
         notification={toastNotification}
@@ -1002,10 +1021,14 @@ function App() {
         actions={commandActions}
       />
 
-      <ExtensionGalleryModal
-        gallery={extensionGallery}
-        onClose={() => setExtensionGallery(null)}
-      />
+      {extensionGallery && (
+        <Suspense fallback={null}>
+          <ExtensionGalleryModal
+            gallery={extensionGallery}
+            onClose={() => setExtensionGallery(null)}
+          />
+        </Suspense>
+      )}
 
       <RemindersModal
         isOpen={isRemindersOpen}

@@ -202,35 +202,148 @@ body {
     border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
-/* Rich Calendar Transitions */
+/* Rich Calendar Transitions
+   Only transform/opacity are animated so the WebView can composite them on the
+   GPU without re-layout or re-paint. */
+:root {
+  --caltemp-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --caltemp-ease-spring: cubic-bezier(0.34, 1.36, 0.64, 1);
+}
+
 @keyframes slideMonthRight {
-  0% {
-    opacity: 0;
-    transform: translateX(20px);
-  }
-  100% {
-    opacity: 1;
-    transform: translateX(0);
-  }
+  from { opacity: 0; transform: translateX(14px); }
+  to { opacity: 1; transform: translateX(0); }
 }
 
 @keyframes slideMonthLeft {
-  0% {
-    opacity: 0;
-    transform: translateX(-20px);
-  }
-  100% {
-    opacity: 1;
-    transform: translateX(0);
-  }
+  from { opacity: 0; transform: translateX(-14px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes viewFadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes viewZoomIn {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes viewZoomOut {
+  from { opacity: 0; transform: scale(1.04); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes eventIn {
+  from { opacity: 0; transform: translateY(4px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes popIn {
+  from { opacity: 0; transform: scale(0.97); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes barGrow {
+  from { transform: scaleX(0); }
 }
 
 .animate-month-right {
-  animation: slideMonthRight 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+  animation: slideMonthRight 0.3s var(--caltemp-ease-out) both;
 }
 
 .animate-month-left {
-  animation: slideMonthLeft 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+  animation: slideMonthLeft 0.3s var(--caltemp-ease-out) both;
+}
+
+.caltemp-view-fade {
+  animation: viewFadeIn 0.24s var(--caltemp-ease-out) both;
+}
+
+.caltemp-view-zoom-in {
+  animation: viewZoomIn 0.3s var(--caltemp-ease-out) both;
+  transform-origin: center top;
+}
+
+.caltemp-view-zoom-out {
+  animation: viewZoomOut 0.3s var(--caltemp-ease-out) both;
+  transform-origin: center top;
+}
+
+.caltemp-event-in {
+  animation: eventIn 0.26s var(--caltemp-ease-out) both;
+}
+
+.caltemp-pop-in {
+  animation: popIn 0.28s var(--caltemp-ease-out) both;
+}
+
+.caltemp-lift {
+  transition:
+    transform 0.18s var(--caltemp-ease-out),
+    background-color 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.caltemp-lift:hover {
+  transform: translateY(-1px);
+}
+
+.caltemp-lift:active {
+  transform: translateY(0) scale(0.985);
+}
+
+.caltemp-day-event {
+  transition: box-shadow 0.18s ease, filter 0.18s ease;
+}
+
+.caltemp-day-event:hover {
+  filter: brightness(1.15);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+
+.caltemp-segment-indicator {
+  transition:
+    transform 0.32s var(--caltemp-ease-spring),
+    width 0.32s var(--caltemp-ease-spring),
+    opacity 0.2s ease;
+}
+
+.caltemp-now-line {
+  transition: transform 0.6s var(--caltemp-ease-out);
+}
+
+.caltemp-bar {
+  transform-origin: left center;
+  animation: barGrow 0.6s var(--caltemp-ease-out) both;
+  transition: transform 0.4s var(--caltemp-ease-out);
+}
+
+.caltemp-slot-chip {
+  transition:
+    transform 0.18s var(--caltemp-ease-out),
+    background-color 0.18s ease,
+    border-color 0.18s ease;
+}
+
+.caltemp-slot-chip:hover {
+  transform: translateY(-1px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .caltemp-view-fade, .caltemp-view-zoom-in, .caltemp-view-zoom-out,
+  .caltemp-event-in, .caltemp-pop-in, .caltemp-bar {
+    animation: none !important;
+  }
+  .caltemp-lift, .caltemp-day-event, .caltemp-segment-indicator,
+  .caltemp-now-line, .caltemp-bar, .caltemp-slot-chip {
+    transition: none !important;
+  }
+  .caltemp-lift:hover, .caltemp-slot-chip:hover {
+    transform: none;
+  }
 }
 
 @theme inline {

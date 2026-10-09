@@ -1,12 +1,15 @@
-import React, { useState, useEffect } from 'react';
-import { X, Calendar, Clock, AlignLeft, Bell, Trash2, Tag, ListChecks, Plus, ChevronDown, ChevronUp } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useDeferredValue } from 'react';
+import { X, Calendar, Clock, AlignLeft, Bell, Trash2, Tag, ListChecks, Plus, ChevronDown, ChevronUp, Sparkles, AlertTriangle } from 'lucide-react';
 import CustomDatePicker from './CustomDatePicker';
 import CustomTimePicker from './CustomTimePicker';
 import CustomRecurrenceSelect from './CustomRecurrenceSelect';
 import { DEFAULT_CATEGORY_LEGEND, inferCategory } from '../domain/events';
 import CustomSelect from './CustomSelect';
+import { findConflicts, suggestTimeSlots } from '../domain/smartScheduling';
 
-export default function EventModal({ isOpen, onClose, onSave, onDelete, initialDate, initialEvent, settings = {} }) {
+const toTimeString = (d) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+
+export default function EventModal({ isOpen, onClose, onSave, onDelete, initialDate, initialEvent, settings = {}, events = [] }) {
     const [title, setTitle] = useState('');
     const [date, setDate] = useState('');
     const [time, setTime] = useState('12:00');
@@ -31,7 +34,6 @@ export default function EventModal({ isOpen, onClose, onSave, onDelete, initialD
     useEffect(() => {
         if (isOpen) {
             if (initialEvent) {
-                // eslint-disable-next-line
                 setTitle(initialEvent.title);
                 const d = new Date(initialEvent.originalDate || initialEvent.date);
 
@@ -65,7 +67,16 @@ export default function EventModal({ isOpen, onClose, onSave, onDelete, initialD
                 const day = String(initialDate.getDate()).padStart(2, '0');
                 setDate(`${y}-${m}-${day}`);
 
-                setTime('09:00');
+                // Keep an explicit time from the caller (e.g. day view "+1h");
+                // a bare day falls back to the best suggested slot, then 09:00.
+                const hasExplicitTime = initialDate.getHours() !== 0 || initialDate.getMinutes() !== 0;
+                const [bestSlot] = hasExplicitTime ? [] : suggestTimeSlots(events, {
+                    date: initialDate,
+                    durationMinutes: 60,
+                    category: 'perso',
+                    limit: 1,
+                });
+                setTime(hasExplicitTime ? toTimeString(initialDate) : bestSlot?.time || '09:00');
                 setTitle('');
                 setDescription('');
                 setReminder(false);
@@ -80,7 +91,38 @@ export default function EventModal({ isOpen, onClose, onSave, onDelete, initialD
             // Reset state when closed
             setIsDeleting(false);
         }
+        // Only re-initialise when the modal opens or its target changes, not on
+        // every background event update.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isOpen, initialDate, initialEvent]);
+
+    // Smart scheduling: typing in the title must stay instant, so the scorer
+    // runs on a deferred copy of the inputs.
+    const deferredTitle = useDeferredValue(title);
+    const slotDate = useMemo(() => {
+        if (!date) return null;
+        const [y, m, d] = date.split('-').map(Number);
+        return y && m && d ? new Date(y, m - 1, d) : null;
+    }, [date]);
+
+    const suggestions = useMemo(() => {
+        if (!isOpen || !slotDate) return [];
+        return suggestTimeSlots(events, {
+            date: slotDate,
+            durationMinutes: Number(durationMinutes) || 60,
+            category,
+            title: deferredTitle,
+            excludeId: initialEvent?.id,
+            limit: 3,
+        });
+    }, [isOpen, slotDate, events, durationMinutes, category, deferredTitle, initialEvent?.id]);
+
+    const conflicts = useMemo(() => {
+        if (!isOpen || !date || !time) return [];
+        return findConflicts(events, new Date(`${date}T${time}`), Number(durationMinutes) || 60, {
+            excludeId: initialEvent?.id,
+        });
+    }, [isOpen, date, time, events, durationMinutes, initialEvent?.id]);
 
     const handleDeleteClick = () => {
         if (isDeleting) {
@@ -182,6 +224,50 @@ export default function EventModal({ isOpen, onClose, onSave, onDelete, initialD
                                 />
                             </div>
                         </div>
+
+                        {conflicts.length > 0 && (
+                            <div role="alert" className="caltemp-event-in flex items-start gap-2 rounded-xl border border-amber-400/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+                                <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-300" />
+                                <span>
+                                    Chevauche {conflicts.length > 1 ? `${conflicts.length} événements` : 'un événement'} :{' '}
+                                    {conflicts.slice(0, 2).map(event => event.title).join(', ')}
+                                    {conflicts.length > 2 ? '…' : ''}
+                                </span>
+                            </div>
+                        )}
+
+                        {suggestions.length > 0 && (
+                            <div className="space-y-2" aria-label="Créneaux suggérés">
+                                <div className="flex items-center gap-1.5 text-xs font-medium text-white/45">
+                                    <Sparkles size={13} className="text-blue-300" />
+                                    Créneaux suggérés
+                                </div>
+                                <div className="flex flex-wrap gap-2">
+                                    {suggestions.map((slot, index) => {
+                                        const active = slot.time === time;
+                                        return (
+                                            <button
+                                                key={slot.time}
+                                                type="button"
+                                                onClick={() => setTime(slot.time)}
+                                                title={slot.reasons.join(' · ') || 'Créneau libre'}
+                                                style={{ animationDelay: `${index * 50}ms` }}
+                                                className={`caltemp-event-in caltemp-slot-chip rounded-full border px-3 py-1.5 text-xs font-semibold ${
+                                                    active
+                                                        ? 'border-blue-400/60 bg-blue-500/25 text-white'
+                                                        : 'border-white/10 bg-white/5 text-white/70 hover:bg-white/10 hover:text-white'
+                                                }`}
+                                            >
+                                                {slot.time} – {slot.endTime}
+                                                {slot.reasons[0] && (
+                                                    <span className="ml-1.5 font-normal text-white/45">· {slot.reasons[0]}</span>
+                                                )}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
                     </section>
 
                     <div className="flex items-center gap-3 p-3 bg-white/5 rounded-xl cursor-pointer hover:bg-white/10 transition-colors" onClick={() => setReminder(!reminder)}>

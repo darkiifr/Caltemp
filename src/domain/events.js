@@ -148,6 +148,42 @@ export function startOfDay(date) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate());
 }
 
+// Normalization is pure for a given event object, so cache it per object
+// reference. The calendar evaluates the same events hundreds of times per render
+// (one call per visible day); this keeps that work proportional to edits.
+const normalizedCache = new WeakMap();
+
+export function normalizeEventCached(event) {
+  if (!event || typeof event !== 'object') return normalizeEvent(event);
+  let normalized = normalizedCache.get(event);
+  if (!normalized) {
+    normalized = normalizeEvent(event);
+    normalizedCache.set(event, normalized);
+  }
+  return normalized;
+}
+
+export function toDayKey(date) {
+  return date.getFullYear() * 10000 + (date.getMonth() + 1) * 100 + date.getDate();
+}
+
+function yearlyDayFor(evDate, year) {
+  const isLeapYear = new Date(year, 1, 29).getDate() === 29;
+  return evDate.getMonth() === 1 && evDate.getDate() === 29 && !isLeapYear ? 28 : evDate.getDate();
+}
+
+function buildOccurrence(event, evDate, y, m, d) {
+  const occurrenceDate = new Date(y, m, d, evDate.getHours(), evDate.getMinutes(), evDate.getSeconds(), 0);
+  return {
+    ...event,
+    date: occurrenceDate.toISOString(),
+    originalDate: event.originalDate || event.date,
+    occurrenceKey: `${event.id}:${occurrenceDate.getTime()}`,
+  };
+}
+
+const byOccurrenceDate = (a, b) => new Date(a.date) - new Date(b.date);
+
 export function getOccurrencesOnDate(events, targetDate) {
   const targetY = targetDate.getFullYear();
   const targetM = targetDate.getMonth();
@@ -156,7 +192,7 @@ export function getOccurrencesOnDate(events, targetDate) {
   const result = [];
 
   for (const rawEvent of events || []) {
-    const event = normalizeEvent(rawEvent);
+    const event = normalizeEventCached(rawEvent);
     const evDate = new Date(event.originalDate || event.date);
     const evStartOfDay = new Date(evDate.getFullYear(), evDate.getMonth(), evDate.getDate()).getTime();
 
@@ -175,28 +211,126 @@ export function getOccurrencesOnDate(events, targetDate) {
       const targetDay = Math.min(evDate.getDate(), daysInTargetMonth);
       occurs = targetD === targetDay;
     } else if (event.recurrence === 'yearly') {
-      const isLeapYear = new Date(targetY, 1, 29).getDate() === 29;
-      const targetDay = evDate.getMonth() === 1 && evDate.getDate() === 29 && !isLeapYear ? 28 : evDate.getDate();
-      occurs = targetM === evDate.getMonth() && targetD === targetDay;
+      occurs = targetM === evDate.getMonth() && targetD === yearlyDayFor(evDate, targetY);
     }
 
-    if (occurs) {
-      const occurrenceDate = new Date(targetDate);
-      occurrenceDate.setHours(evDate.getHours(), evDate.getMinutes(), evDate.getSeconds(), 0);
-      result.push({
-        ...event,
-        date: occurrenceDate.toISOString(),
-        originalDate: event.originalDate || event.date,
-        occurrenceKey: `${event.id}:${occurrenceDate.getTime()}`,
-      });
+    if (occurs) result.push(buildOccurrence(event, evDate, targetY, targetM, targetD));
+  }
+
+  return result.sort(byOccurrenceDate);
+}
+
+// Day-keyed occurrence lookup. Buckets hold lightweight entries and are turned
+// into full occurrence objects only when a day is actually read, so views that
+// just need "is this day busy?" (year view) never pay for materialization.
+class OccurrenceIndex {
+  constructor() {
+    this.pending = new Map();
+    this.materialized = new Map();
+  }
+
+  add(key, event, evDate, y, m, d) {
+    const time = new Date(y, m, d, evDate.getHours(), evDate.getMinutes(), evDate.getSeconds(), 0).getTime();
+    const bucket = this.pending.get(key);
+    const entry = { event, evDate, y, m, d, time };
+    if (bucket) bucket.push(entry);
+    else this.pending.set(key, [entry]);
+  }
+
+  get size() {
+    return this.pending.size;
+  }
+
+  has(key) {
+    return this.pending.has(key);
+  }
+
+  get(key) {
+    let occurrences = this.materialized.get(key);
+    if (occurrences) return occurrences;
+    const bucket = this.pending.get(key);
+    if (!bucket) return undefined;
+    // Stable sort keeps event order for identical times, like getOccurrencesOnDate.
+    occurrences = bucket
+      .slice()
+      .sort((a, b) => a.time - b.time)
+      .map(({ event, evDate, y, m, d }) => buildOccurrence(event, evDate, y, m, d));
+    this.materialized.set(key, occurrences);
+    return occurrences;
+  }
+
+  keys() {
+    return this.pending.keys();
+  }
+}
+
+/**
+ * Expands every event into its occurrences between `rangeStart` and `rangeEnd`
+ * (inclusive, by calendar day) and groups them by day key (see `toDayKey`).
+ *
+ * Instead of testing every event against every day (days × events), each
+ * recurrence rule jumps straight to its next matching day, so the cost is
+ * proportional to the number of occurrences actually produced. Results are
+ * identical to calling `getOccurrencesOnDate` for each day of the range.
+ */
+export function buildOccurrenceIndex(events, rangeStart, rangeEnd) {
+  const index = new OccurrenceIndex();
+  const startDay = new Date(rangeStart.getFullYear(), rangeStart.getMonth(), rangeStart.getDate());
+  const endDay = new Date(rangeEnd.getFullYear(), rangeEnd.getMonth(), rangeEnd.getDate());
+  const startTime = startDay.getTime();
+  const endTime = endDay.getTime();
+  if (endTime < startTime) return index;
+
+  const push = (event, evDate, y, m, d) => index.add(y * 10000 + (m + 1) * 100 + d, event, evDate, y, m, d);
+
+  for (const rawEvent of events || []) {
+    const event = normalizeEventCached(rawEvent);
+    const evDate = new Date(event.originalDate || event.date);
+    if (Number.isNaN(evDate.getTime())) continue;
+    const evDay = new Date(evDate.getFullYear(), evDate.getMonth(), evDate.getDate());
+    if (evDay.getTime() > endTime) continue;
+    const recurrence = event.recurrence || 'none';
+
+    if (recurrence === 'none') {
+      if (evDay.getTime() >= startTime) push(event, evDate, evDay.getFullYear(), evDay.getMonth(), evDay.getDate());
+    } else if (recurrence === 'daily' || recurrence === 'weekly') {
+      const step = recurrence === 'daily' ? 1 : 7;
+      const cursor = new Date(evDay);
+      if (cursor.getTime() < startTime) {
+        const diffDays = Math.round((startTime - cursor.getTime()) / 86400000);
+        cursor.setDate(cursor.getDate() + Math.ceil(diffDays / step) * step);
+      }
+      while (cursor.getTime() <= endTime) {
+        push(event, evDate, cursor.getFullYear(), cursor.getMonth(), cursor.getDate());
+        cursor.setDate(cursor.getDate() + step);
+      }
+    } else if (recurrence === 'monthly') {
+      // Start from whichever month comes later: the event's first month or the range's.
+      const from = evDay.getTime() >= startTime ? evDay : startDay;
+      let y = from.getFullYear();
+      let m = from.getMonth();
+      for (;;) {
+        const day = Math.min(evDate.getDate(), new Date(y, m + 1, 0).getDate());
+        const time = new Date(y, m, day).getTime();
+        if (time > endTime) break;
+        if (time >= startTime && time >= evDay.getTime()) push(event, evDate, y, m, day);
+        m += 1;
+        if (m > 11) { m = 0; y += 1; }
+      }
+    } else if (recurrence === 'yearly') {
+      for (let y = Math.max(evDay.getFullYear(), startDay.getFullYear()); y <= endDay.getFullYear(); y += 1) {
+        const day = yearlyDayFor(evDate, y);
+        const time = new Date(y, evDate.getMonth(), day).getTime();
+        if (time >= startTime && time <= endTime && time >= evDay.getTime()) push(event, evDate, y, evDate.getMonth(), day);
+      }
     }
   }
 
-  return result.sort((a, b) => new Date(a.date) - new Date(b.date));
+  return index;
 }
 
 export function getNextOccurrence(event, now = new Date()) {
-  const normalized = normalizeEvent(event);
+  const normalized = normalizeEventCached(event);
   const evDate = new Date(normalized.originalDate || normalized.date);
   if (evDate >= now) return evDate;
   if (!normalized.recurrence || normalized.recurrence === 'none') return null;
@@ -221,9 +355,8 @@ export function getNextOccurrence(event, now = new Date()) {
       const daysInMonth = new Date(candidate.getFullYear(), candidate.getMonth() + 1, 0).getDate();
       isValid = candidate.getDate() === Math.min(evDate.getDate(), daysInMonth);
     } else if (normalized.recurrence === 'yearly') {
-      const leap = new Date(candidate.getFullYear(), 1, 29).getDate() === 29;
-      const day = evDate.getMonth() === 1 && evDate.getDate() === 29 && !leap ? 28 : evDate.getDate();
-      isValid = candidate.getMonth() === evDate.getMonth() && candidate.getDate() === day;
+      isValid = candidate.getMonth() === evDate.getMonth()
+        && candidate.getDate() === yearlyDayFor(evDate, candidate.getFullYear());
     }
 
     if (isValid) return candidate;

@@ -1,4 +1,4 @@
-import { getNextOccurrence, normalizeEvent, startOfDay } from './events';
+import { getNextOccurrence, normalizeEventCached, startOfDay } from './events';
 
 const FIVE_MINUTES = 5 * 60 * 1000;
 
@@ -39,7 +39,7 @@ export function buildReminderNotifications(events = [], now = new Date()) {
   const due = [];
 
   for (const rawEvent of events) {
-    const event = normalizeEvent(rawEvent);
+    const event = normalizeEventCached(rawEvent);
     if (!event.reminder) continue;
 
     const checkFromDate = new Date(now.getTime() - FIVE_MINUTES);

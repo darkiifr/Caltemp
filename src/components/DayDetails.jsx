@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { memo, useState, useEffect } from 'react';
 import { Clock, Calendar, Gift, AlertCircle } from 'lucide-react';
 import { getNameDay } from '../utils/namedays';
 import { playBubbleSound } from '../utils/sound';
@@ -9,10 +9,15 @@ function EventCountdown({ date }) {
     const [status, setStatus] = useState('future'); // future, now, past
 
     useEffect(() => {
-        const calculateTimeLeft = () => {
-            const now = new Date();
-            const target = new Date(date);
-            const diff = target - now;
+        let timeoutId;
+        const target = new Date(date).getTime();
+
+        // Adaptive tick: seconds are only shown during the last hour, so further
+        // away we re-render once per minute; past events stop ticking entirely and
+        // a hidden window does not tick at all.
+        const tick = () => {
+            clearTimeout(timeoutId);
+            const diff = target - Date.now();
 
             if (diff < -60000) { // 1 minute past
                 setStatus('past');
@@ -22,6 +27,7 @@ function EventCountdown({ date }) {
             if (diff <= 0) {
                 setStatus('now');
                 setTimeLeft('Maintenant');
+                timeoutId = setTimeout(tick, diff + 60000 + 50);
                 return;
             }
 
@@ -31,19 +37,31 @@ function EventCountdown({ date }) {
             const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
             const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
             const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+            const showSeconds = diff < 60 * 60 * 1000;
 
             const parts = [];
             if (days > 0) parts.push(`${days}j`);
             if (hours > 0) parts.push(`${hours}h`);
-            if (minutes > 0) parts.push(`${minutes}m`);
-            parts.push(`${seconds}s`);
+            if (minutes > 0 || !showSeconds) parts.push(`${minutes}m`);
+            if (showSeconds) parts.push(`${seconds}s`);
 
             setTimeLeft(parts.join(' '));
+
+            if (document.hidden) return;
+            const unit = showSeconds ? 1000 : 60000;
+            timeoutId = setTimeout(tick, (diff % unit) || unit);
         };
 
-        calculateTimeLeft();
-        const timer = setInterval(calculateTimeLeft, 1000);
-        return () => clearInterval(timer);
+        const handleVisibility = () => {
+            if (!document.hidden) tick();
+        };
+
+        tick();
+        document.addEventListener('visibilitychange', handleVisibility);
+        return () => {
+            clearTimeout(timeoutId);
+            document.removeEventListener('visibilitychange', handleVisibility);
+        };
     }, [date]);
 
     if (status === 'past') return <span className="text-gray-500 text-xs">Terminé</span>;
@@ -57,7 +75,7 @@ function EventCountdown({ date }) {
     );
 }
 
-export default function DayDetails({ date, events, holiday, showNamedays, onEditEvent, onDeleteEvent, settings = {} }) {
+function DayDetails({ date, events, holiday, showNamedays, onEditEvent, onDeleteEvent, settings = {} }) {
     const [contextMenu, setContextMenu] = useState(null);
     const nameDay = showNamedays ? getNameDay(date) : null;
 
@@ -116,12 +134,13 @@ export default function DayDetails({ date, events, holiday, showNamedays, onEdit
                         <p>Aucun événement</p>
                     </div>
                 ) : (
-                    sortedEvents.map(event => (
+                    sortedEvents.map((event, index) => (
                         <div
-                            key={event.id}
+                            key={`${event.occurrenceKey || event.id}`}
+                            style={{ animationDelay: `${Math.min(index, 8) * 40}ms` }}
                             onContextMenu={(e) => handleContextMenu(e, event)}
                             onClick={() => { playBubbleSound(); onEditEvent && onEditEvent(event); }}
-                            className="bg-white/5 hover:bg-white/10 border border-white/5 rounded-xl p-4 transition-colors group cursor-pointer select-none"
+                            className="caltemp-event-in caltemp-lift bg-white/5 hover:bg-white/10 border border-white/5 rounded-xl p-4 group cursor-pointer select-none"
                         >
                             <div className="flex justify-between items-start mb-2">
                                 <h5 className="font-medium text-white truncate pr-2">{event.title}</h5>
@@ -170,3 +189,5 @@ export default function DayDetails({ date, events, holiday, showNamedays, onEdit
         </div>
     );
 }
+
+export default memo(DayDetails);
