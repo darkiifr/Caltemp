@@ -16,6 +16,15 @@ const MISS_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_ENTRIES = 5000;
 const SAVE_DEBOUNCE_MS = 1500;
 
+export function buildGeocodeQueries(text = '') {
+  const parts = String(text).split(',').map(part => part.trim()).filter(Boolean);
+  const queries = [parts.join(', ')];
+  for (let start = 1; parts.length - start >= 2 && queries.length < 3; start += 1) {
+    queries.push(parts.slice(start).join(', '));
+  }
+  return queries;
+}
+
 export function createGeocoder({
   fetcher = globalThis.fetch,
   storage = null,
@@ -75,11 +84,11 @@ export function createGeocoder({
     return entry.lat != null ? { lat: entry.lat, lng: entry.lng, label: entry.label, source: 'geocoded' } : null;
   }
 
-  async function request(text) {
+  async function requestOnce(query) {
     const elapsed = now() - lastRequestAt;
     if (elapsed < MIN_INTERVAL_MS) await wait(MIN_INTERVAL_MS - elapsed);
     lastRequestAt = now();
-    const url = `${ENDPOINT}?${new URLSearchParams({ q: text, format: 'jsonv2', limit: '1', 'accept-language': 'fr' })}`;
+    const url = `${ENDPOINT}?${new URLSearchParams({ q: query, format: 'jsonv2', limit: '1', 'accept-language': 'fr' })}`;
     const response = await fetcher(url, {
       method: 'GET',
       headers: { Accept: 'application/json', 'User-Agent': USER_AGENT },
@@ -89,8 +98,19 @@ export function createGeocoder({
     const lat = Number(hit?.lat);
     const lng = Number(hit?.lon);
     return Number.isFinite(lat) && Number.isFinite(lng)
-      ? { lat, lng, label: hit.display_name || text }
+      ? { lat, lng, label: hit.display_name || query }
       : null;
+  }
+
+  // "Lycée Henri-IV, 23 rue Clovis, Paris" mixes a place name with its address,
+  // which Nominatim often cannot match as a whole: on a miss, retry without the
+  // leading parts, as long as at least "street, city" remains.
+  async function request(text) {
+    for (const query of buildGeocodeQueries(text)) {
+      const hit = await requestOnce(query);
+      if (hit) return hit;
+    }
+    return null;
   }
 
   function geocode(text) {

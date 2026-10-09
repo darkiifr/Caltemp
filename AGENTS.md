@@ -94,7 +94,7 @@ Run from repository root unless noted.
 - Sync status fields (`ICS_SYNC_STATE_FIELDS`) are owned by background syncs: merge them with `mergeIcsSyncState` instead of overwriting from a stale copy.
 
 ### 3c) Reminders map
-- `src/components/SlippyMap.jsx` is a dependency-free tile map (CARTO raster tiles); pan/zoom only write CSS transforms, React re-renders when the tile set or zoom level changes. Geometry/clustering helpers are in `src/domain/geo.js`.
+- `src/components/SlippyMap.jsx` is a dependency-free tile map (keyless raster tiles from `src/domain/mapTiles.js`: OpenStreetMap by default, Plan IGN optional via `settings.mapProvider`; dark theme = CSS filter). CARTO basemaps now require an API key: do not use them; pan/zoom only write CSS transforms, React re-renders when the tile set or zoom level changes. Geometry/clustering helpers are in `src/domain/geo.js`.
 - `src/components/RemindersMap.jsx` is the `map` view of `CalendarView`; `src/domain/mapItems.js` turns events into map items.
 - Positions come from `event.geo` (manual pin or ICS `GEO`), coordinates in `event.location`, then the Nominatim cache (`src/services/geocoding.js`, 1 req/s, `geocache.json`). Geocoding is opt-in (`settings.mapAutoGeocode`) or user-triggered; only the location text is sent.
 

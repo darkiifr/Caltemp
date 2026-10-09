@@ -4,6 +4,7 @@ import SlippyMap from './SlippyMap';
 import { formatEventDate } from '../domain/events';
 import { normalizeLocationKey } from '../domain/geo';
 import { buildMapItems } from '../domain/mapItems';
+import { TILE_PROVIDERS, getTileProviderId } from '../domain/mapTiles';
 import { getGeocoder } from '../services/geocoding';
 
 const PERIODS = [
@@ -61,9 +62,10 @@ function RemindersMap({ events, settings = {}, onEditEvent, onSettingsPatch }) {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [autoGeocode, geocoder, unresolvedKey]);
 
-    // Fit on filter changes and when the first places appear, not on every update.
     const hasItems = items.length > 0;
-    const fitKey = hasItems ? `${period}:${alertsOnly}` : '';
+    // Refit once a geocoding run is over, not on its first answer (which would
+    // zoom onto a single place).
+    const fitKey = hasItems && !geocoding ? `${period}:${alertsOnly}:${items.length}` : '';
 
     const selectedItems = useMemo(() => {
         if (!selection) return [];
@@ -87,6 +89,7 @@ function RemindersMap({ events, settings = {}, onEditEvent, onSettingsPatch }) {
     };
 
     const theme = settings.theme === 'light' ? 'light' : 'dark';
+    const providerId = getTileProviderId(settings);
     const listItems = items.slice(0, MAX_LIST_ITEMS);
 
     return (
@@ -112,6 +115,26 @@ function RemindersMap({ events, settings = {}, onEditEvent, onSettingsPatch }) {
                         <input type="checkbox" checked={alertsOnly} onChange={(e) => setAlertsOnly(e.target.checked)} />
                         <Bell size={12} /> Rappels avec alerte uniquement
                     </label>
+                    {onSettingsPatch && (
+                        <div className="flex items-center gap-2 text-xs text-white/50">
+                            Fond
+                            <div className="flex flex-1 rounded-lg bg-black/20 p-0.5" role="group" aria-label="Fond de carte">
+                                {Object.entries(TILE_PROVIDERS).map(([id, { label }]) => (
+                                    <button
+                                        key={id}
+                                        type="button"
+                                        aria-pressed={providerId === id}
+                                        onClick={() => onSettingsPatch({ mapProvider: id })}
+                                        className={`flex-1 rounded-md px-2 py-1 font-semibold transition-colors ${
+                                            providerId === id ? 'bg-white/15 text-white' : 'text-white/45 hover:text-white/80'
+                                        }`}
+                                    >
+                                        {label}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 {notFound > 0 && !unresolved.length && !geocoding && (
@@ -204,6 +227,7 @@ function RemindersMap({ events, settings = {}, onEditEvent, onSettingsPatch }) {
                     points={items}
                     fitKey={fitKey}
                     theme={theme}
+                    provider={providerId}
                     selectedKey={selection?.anchor || ''}
                     onSelect={handleSelect}
                     onMapClick={() => setSelection(null)}

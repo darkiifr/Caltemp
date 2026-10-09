@@ -3,6 +3,7 @@ import { Minus, Plus, Maximize2 } from 'lucide-react';
 import {
     MAX_ZOOM, MIN_ZOOM, TILE_SIZE, clamp, clusterPoints, fitBounds, getVisibleTiles, unproject, worldSize,
 } from '../domain/geo';
+import { DEFAULT_TILE_PROVIDER, TILE_PROVIDERS } from '../domain/mapTiles';
 
 // A dependency-free slippy map tuned for the WebView:
 // - panning and fractional zoom only rewrite one CSS transform per layer, on the
@@ -12,17 +13,15 @@ import {
 //   so zooming never flashes an empty map,
 // - markers are clustered on a screen-space grid once per zoom level.
 
-const TILE_STYLES = { dark: 'dark_all', light: 'light_all' };
-const TILE_SUBDOMAINS = 'abcd';
+
 const BACK_LAYER_TIMEOUT_MS = 1500;
 const CLICK_TOLERANCE_PX = 5;
 const ZOOM_SETTLE_MS = 120;
 const prefersReducedMotion = () => typeof window !== 'undefined'
     && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 
-function tileUrl(style, tile, retina) {
-    const subdomain = TILE_SUBDOMAINS[(tile.wrappedX + tile.y) % TILE_SUBDOMAINS.length];
-    return `https://${subdomain}.basemaps.cartocdn.com/${style}/${tile.z}/${tile.wrappedX}/${tile.y}${retina ? '@2x' : ''}.png`;
+function tileUrl(provider, tile) {
+    return provider.url(tile.z, tile.wrappedX, tile.y);
 }
 
 function clampView(view, height) {
@@ -33,13 +32,13 @@ function clampView(view, height) {
     return { cx: ((view.cx % 1) + 1) % 1, cy, zoom };
 }
 
-const Tile = memo(function Tile({ tile, ox, oy, style, retina, onSettled }) {
+const Tile = memo(function Tile({ tile, ox, oy, provider, onSettled }) {
     return (
         <img
             alt=""
             draggable={false}
             decoding="async"
-            src={tileUrl(style, tile, retina)}
+            src={tileUrl(provider, tile)}
             className="caltemp-map-tile absolute"
             style={{ left: (tile.x - ox) * TILE_SIZE, top: (tile.y - oy) * TILE_SIZE, width: TILE_SIZE, height: TILE_SIZE }}
             onLoad={(event) => { event.currentTarget.dataset.loaded = '1'; onSettled?.(); }}
@@ -85,6 +84,7 @@ function SlippyMap({
     points = [],
     fitKey = '',
     theme = 'dark',
+    provider: providerId = DEFAULT_TILE_PROVIDER,
     selectedKey = '',
     onSelect,
     onMapClick,
@@ -113,8 +113,7 @@ function SlippyMap({
     const [front, setFront] = useState({ z: Math.round(initialView.zoom), ox: 0, oy: 0, tiles: [] });
     const [back, setBack] = useState(null);
     const [settleTick, setSettleTick] = useState(0);
-    const style = TILE_STYLES[theme] || TILE_STYLES.dark;
-    const retina = typeof window !== 'undefined' && window.devicePixelRatio > 1.25;
+    const provider = TILE_PROVIDERS[providerId] || TILE_PROVIDERS[DEFAULT_TILE_PROVIDER];
 
     // Transform for a rendered layer, from the level/origin it actually shows.
     const layerTransform = (element) => {
@@ -169,8 +168,12 @@ function SlippyMap({
         }
 
         if (deferLevel) {
+            // Only rescale what is already there: covering the viewport with
+            // the old level after zooming out several levels would mean
+            // thousands of tiles.
             clearTimeout(settleTimerRef.current);
             settleTimerRef.current = setTimeout(() => setSettleTick(tick => tick + 1), ZOOM_SETTLE_MS + 20);
+            return;
         }
         const tiles = getVisibleTiles({ cx, cy, z: shownZ, width, height, scale: 2 ** (zoom - shownZ) });
         if (tiles.rangeKey === state.rangeKey) return;
@@ -204,7 +207,7 @@ function SlippyMap({
     // Layers re-mount on zoom-level change: position them before paint.
     useLayoutEffect(() => {
         apply();
-    }, [front.z, back?.z, apply]);
+    }, [front.z, back?.z, providerId, apply]);
 
     const stopAnimation = () => {
         cancelAnimationFrame(animationRef.current);
@@ -457,7 +460,7 @@ function SlippyMap({
             tabIndex={0}
             role="application"
             aria-label="Carte interactive : glisser pour se déplacer, molette ou +/- pour zoomer"
-            className={`caltemp-map relative overflow-hidden select-none outline-none touch-none ${theme === 'light' ? 'caltemp-map-light' : ''} ${className}`}
+            className={`caltemp-map relative overflow-hidden select-none outline-none touch-none ${theme === 'light' ? 'caltemp-map-light' : 'caltemp-map-dark'} ${className}`}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
@@ -466,12 +469,12 @@ function SlippyMap({
             onKeyDown={handleKeyDown}
         >
             {back && (
-                <div ref={backRef} data-z={back.z} data-ox={back.ox} data-oy={back.oy} className="absolute left-0 top-0 origin-top-left pointer-events-none" key={`back-${back.z}`}>
-                    {back.tiles.map(tile => <Tile key={tile.key} tile={tile} ox={back.ox} oy={back.oy} style={style} retina={retina} />)}
+                <div ref={backRef} data-z={back.z} data-ox={back.ox} data-oy={back.oy} className="caltemp-map-tiles absolute left-0 top-0 origin-top-left pointer-events-none" key={`back-${providerId}-${back.z}`}>
+                    {back.tiles.map(tile => <Tile key={tile.key} tile={tile} ox={back.ox} oy={back.oy} provider={provider} />)}
                 </div>
             )}
-            <div ref={frontRef} data-z={front.z} data-ox={front.ox} data-oy={front.oy} className="absolute left-0 top-0 origin-top-left pointer-events-none will-change-transform" key={`front-${front.z}`}>
-                {front.tiles.map(tile => <Tile key={tile.key} tile={tile} ox={front.ox} oy={front.oy} style={style} retina={retina} onSettled={handleFrontSettled} />)}
+            <div ref={frontRef} data-z={front.z} data-ox={front.ox} data-oy={front.oy} className="caltemp-map-tiles absolute left-0 top-0 origin-top-left pointer-events-none will-change-transform" key={`front-${providerId}-${front.z}`}>
+                {front.tiles.map(tile => <Tile key={tile.key} tile={tile} ox={front.ox} oy={front.oy} provider={provider} onSettled={handleFrontSettled} />)}
             </div>
             <div ref={markerRef} data-z={front.z} data-ox={front.ox} data-oy={front.oy} className="caltemp-map-markers absolute left-0 top-0 origin-top-left will-change-transform" key={`markers-${front.z}`}>
                 {clusters.map(cluster => (
@@ -501,7 +504,7 @@ function SlippyMap({
                 )}
             </div>
             <div data-map-control="" className="absolute bottom-1 right-1 z-10 rounded bg-black/50 px-1.5 py-0.5 text-[10px] text-white/60">
-                © OpenStreetMap · © CARTO
+                {provider.attribution}
             </div>
             {children}
         </div>
