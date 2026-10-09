@@ -1,11 +1,12 @@
-import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import React, { memo, useState, useMemo, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
 import { getHolidays } from '../utils/holidays';
 import DayDetails from './DayDetails';
 import { playBubbleSound } from '../utils/sound';
 import { getOccurrencesOnDate } from '../utils/eventUtils';
 import { buildStats } from '../domain/planning';
-import { formatEventDate, DEFAULT_CATEGORY_LEGEND } from '../domain/events';
+import { buildOccurrenceIndex, formatEventDate, toDayKey, DEFAULT_CATEGORY_LEGEND } from '../domain/events';
+import { layoutDayEvents } from '../domain/smartScheduling';
 
 const DAYS = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
 const MONTHS = [
@@ -15,8 +16,37 @@ const MONTHS = [
 
 const AGENDA_WINDOW_DAYS = 45;
 const FOCUS_WINDOW_DAYS = 14;
+const VIEW_OPTIONS = [
+    ['year', 'Année'],
+    ['month', 'Mois'],
+    ['week', 'Semaine'],
+    ['day', 'Jour'],
+    ['agenda', 'Agenda'],
+    ['focus', 'Focus'],
+    ['stats', 'Stats'],
+];
+const EMPTY_DAY = [];
+// Cap the stagger so long lists still settle quickly.
+const staggerDelay = (index, step = 30) => ({ animationDelay: `${Math.min(index, 8) * step}ms` });
 
-export default function CalendarView({ events, settings = {}, onAddEvent, onEditEvent, onDeleteEvent, onViewChange, showHolidays = true, showNamedays = true }) {
+// Day range whose occurrences the current view needs, so they are expanded once
+// per navigation instead of once per rendered cell.
+function getVisibleRange(view, currentDate) {
+    const y = currentDate.getFullYear();
+    const m = currentDate.getMonth();
+    const d = currentDate.getDate();
+    if (view === 'year') return [new Date(y, 0, 1), new Date(y, 11, 31)];
+    if (view === 'month') return [new Date(y, m, 1), new Date(y, m + 1, 0)];
+    if (view === 'week' || view === 'stats') {
+        const start = new Date(y, m, d - currentDate.getDay());
+        return [start, new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6)];
+    }
+    if (view === 'agenda') return [new Date(y, m, d), new Date(y, m, d + AGENDA_WINDOW_DAYS - 1)];
+    if (view === 'focus') return [new Date(y, m, d), new Date(y, m, d + FOCUS_WINDOW_DAYS - 1)];
+    return [new Date(y, m, d), new Date(y, m, d)];
+}
+
+function CalendarView({ events, settings = {}, onAddEvent, onEditEvent, onDeleteEvent, onViewChange, showHolidays = true, showNamedays = true }) {
     const [currentDate, setCurrentDate] = useState(new Date());
     const [selectedDate, setSelectedDate] = useState(new Date());
     const [view, setView] = useState('month'); // 'year', 'month', 'week', 'day', 'agenda', 'focus', 'stats'
@@ -25,43 +55,49 @@ export default function CalendarView({ events, settings = {}, onAddEvent, onEdit
     const [isDocumentVisible, setIsDocumentVisible] = useState(() => typeof document === 'undefined' ? true : !document.hidden);
     const dayScrollRef = useRef(null);
 
-    // Update 'now' every minute for the red line, only if the app is not hidden
+    // Only the day view shows the current-time line, so only tick there, aligned
+    // on the minute boundary, and pause entirely while the window is hidden.
     useEffect(() => {
-        const handleVisibility = () => {
-            const visible = !document.hidden;
-            setIsDocumentVisible(visible);
-            if (visible) setNow(new Date());
+        if (view !== 'day') return undefined;
+        let timeoutId;
+        const schedule = () => {
+            clearTimeout(timeoutId);
+            if (document.hidden) return;
+            const current = new Date();
+            setNow(current);
+            timeoutId = setTimeout(schedule, 60000 - (current.getSeconds() * 1000 + current.getMilliseconds()) + 50);
         };
-        const interval = setInterval(() => {
-            if (!document.hidden) {
-                setNow(new Date());
-            }
-        }, 60000);
+        const handleVisibility = () => {
+            setIsDocumentVisible(!document.hidden);
+            schedule();
+        };
+        schedule();
         document.addEventListener('visibilitychange', handleVisibility);
         return () => {
-            clearInterval(interval);
+            clearTimeout(timeoutId);
             document.removeEventListener('visibilitychange', handleVisibility);
         };
-    }, []);
+    }, [view]);
 
     useEffect(() => {
         onViewChange?.(view);
     }, [onViewChange, view]);
 
-    // Scroll to current time on view change to 'day'
+    // Scroll near the current time when entering the day view or changing day.
+    // Deliberately not tied to the minute tick, so the user's scroll position is kept.
+    const dayViewKey = view === 'day' ? toDayKey(currentDate) : null;
     useEffect(() => {
-        if (isDocumentVisible && view === 'day' && dayScrollRef.current) {
-             // Scroll to 2 hours before now, or 8am if morning
-             const h = now.getHours();
-             const scrollInPx = Math.max(0, (h - 2) * 80); 
-             dayScrollRef.current.scrollTop = scrollInPx;
+        if (isDocumentVisible && dayViewKey && dayScrollRef.current) {
+            const h = new Date().getHours();
+            dayScrollRef.current.scrollTo?.({ top: Math.max(0, (h - 2) * 80), behavior: 'smooth' });
         }
-    }, [isDocumentVisible, view, now]);
+    }, [isDocumentVisible, dayViewKey]);
 
     // Holidays memo (year based)
+    const currentYear = currentDate.getFullYear();
     const holidays = useMemo(() => {
-        return showHolidays ? getHolidays(currentDate.getFullYear()) : [];
-    }, [currentDate, showHolidays]);
+        return showHolidays ? getHolidays(currentYear) : [];
+    }, [currentYear, showHolidays]);
 
     const getDaysInMonth = (date) => {
         const year = date.getFullYear();
@@ -84,9 +120,21 @@ export default function CalendarView({ events, settings = {}, onAddEvent, onEdit
             d1.getFullYear() === d2.getFullYear();
     };
 
+    const [rangeStart, rangeEnd] = getVisibleRange(view, currentDate);
+    const rangeStartKey = toDayKey(rangeStart);
+    const rangeEndKey = toDayKey(rangeEnd);
+    const occurrenceIndex = useMemo(
+        () => buildOccurrenceIndex(events, rangeStart, rangeEnd),
+        // The range is fully described by its day keys.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [events, rangeStartKey, rangeEndKey],
+    );
+
     const getEventsForDay = useCallback((date) => {
+        const key = toDayKey(date);
+        if (key >= rangeStartKey && key <= rangeEndKey) return occurrenceIndex.get(key) || EMPTY_DAY;
         return getOccurrencesOnDate(events, date);
-    }, [events]);
+    }, [events, occurrenceIndex, rangeStartKey, rangeEndKey]);
 
     const categoryLegend = settings.categoryLegend || DEFAULT_CATEGORY_LEGEND;
 
@@ -117,11 +165,18 @@ export default function CalendarView({ events, settings = {}, onAddEvent, onEdit
         // Let's keep selectedDate independent unless clicked.
     };
 
-    // Zoom/View Control
+    // Zoom/View Control. `viewMotion` picks the transition: zooming in grows from
+    // the content, zooming out shrinks back, sibling views cross-fade.
+    const [viewMotion, setViewMotion] = useState('fade');
+    const changeView = useCallback((nextView, motion = 'fade') => {
+        setViewMotion(motion);
+        setView(nextView);
+    }, []);
+
     const zoomOut = () => {
-        if (view === 'day') setView('week');
-        else if (view === 'week') setView('month');
-        else if (view === 'month') setView('year');
+        if (view === 'day') changeView('week', 'zoom-out');
+        else if (view === 'week') changeView('month', 'zoom-out');
+        else if (view === 'month') changeView('year', 'zoom-out');
     };
 
     const zoomIn = (targetDate, targetView) => {
@@ -129,8 +184,29 @@ export default function CalendarView({ events, settings = {}, onAddEvent, onEdit
             setCurrentDate(targetDate);
             setSelectedDate(targetDate);
         }
-        if (targetView) setView(targetView);
+        if (targetView) changeView(targetView, 'zoom-in');
     };
+
+    // Sliding pill behind the active view button.
+    const segmentedRef = useRef(null);
+    const [indicator, setIndicator] = useState({ left: 0, width: 0 });
+    useLayoutEffect(() => {
+        const container = segmentedRef.current;
+        if (!container) return undefined;
+        const measure = () => {
+            const button = container.querySelector(`[data-view="${view}"]`);
+            if (!button) return;
+            const next = { left: button.offsetLeft, width: button.offsetWidth };
+            setIndicator(prev => (prev.left === next.left && prev.width === next.width ? prev : next));
+        };
+        measure();
+        if (typeof ResizeObserver === 'undefined') return undefined;
+        const observer = new ResizeObserver(measure);
+        observer.observe(container);
+        return () => observer.disconnect();
+    }, [view]);
+
+    const navAnimation = direction === 'right' ? 'animate-month-right' : 'animate-month-left';
 
     // Renderers
     const renderHeader = () => {
@@ -176,7 +252,7 @@ export default function CalendarView({ events, settings = {}, onAddEvent, onEdit
             <div className="flex justify-between items-center mb-4 shrink-0">
                 <div 
                     key={`${view}-${currentDate.toString()}`} 
-                    className={`cursor-pointer hover:opacity-80 transition-opacity ${direction === 'right' ? 'animate-month-right' : 'animate-month-left'}`}
+                    className={`cursor-pointer hover:opacity-80 transition-opacity ${navAnimation}`}
                     onClick={zoomOut}
                     title={view !== 'year' ? "Zoomer arrière" : ""}
                 >
@@ -190,17 +266,28 @@ export default function CalendarView({ events, settings = {}, onAddEvent, onEdit
                     )}
                 </div>
                 <div className="flex gap-2 items-center">
-                    <div className="bg-white/5 p-1 rounded-xl flex items-center mr-2 border border-white/5 shadow-inner">
-                        {['year', 'month', 'week', 'day', 'agenda', 'focus', 'stats'].map((v) => (
+                    <div ref={segmentedRef} className="relative bg-white/5 p-1 rounded-xl flex items-center mr-2 border border-white/5 shadow-inner">
+                        <span
+                            aria-hidden="true"
+                            className="caltemp-segment-indicator absolute top-1 bottom-1 left-0 rounded-lg bg-white/15 shadow-sm"
+                            style={{
+                                width: indicator.width,
+                                transform: `translateX(${indicator.left}px)`,
+                                opacity: indicator.width ? 1 : 0,
+                            }}
+                        />
+                        {VIEW_OPTIONS.map(([v, label]) => (
                            <button
                                 key={v}
-                                onClick={() => setView(v)}
-                                className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-all duration-200 ${
-                                    view === v ? 'bg-white/15 text-white shadow-sm' : 'text-white/40 hover:text-white/80 hover:bg-white/5'
+                                data-view={v}
+                                onClick={() => changeView(v)}
+                                aria-pressed={view === v}
+                                className={`relative z-10 px-4 py-1.5 text-xs font-semibold rounded-lg transition-colors duration-200 ${
+                                    view === v ? 'text-white' : 'text-white/40 hover:text-white/80'
                                 }`}
                            >
-                               {v === 'year' ? 'Année' : v === 'month' ? 'Mois' : v === 'week' ? 'Semaine' : v === 'day' ? 'Jour' : v === 'agenda' ? 'Agenda' : v === 'focus' ? 'Focus' : 'Stats'}
-                           </button> 
+                               {label}
+                           </button>
                         ))}
                     </div>
 
@@ -229,7 +316,7 @@ export default function CalendarView({ events, settings = {}, onAddEvent, onEdit
     };
 
     const renderYearView = () => (
-        <div className={`grid grid-cols-4 gap-4 flex-1 overflow-y-auto content-start p-2 ${direction === 'right' ? 'animate-month-right' : 'animate-month-left'}`}>
+        <div key={rangeStartKey} className={`grid grid-cols-4 gap-4 flex-1 overflow-y-auto content-start p-2 ${navAnimation}`}>
             {MONTHS.map((monthName, monthIndex) => {
                 const isCurrentMonth = monthIndex === new Date().getMonth() && currentDate.getFullYear() === new Date().getFullYear();
                 const daysInMonth = new Date(currentDate.getFullYear(), monthIndex + 1, 0).getDate();
@@ -238,12 +325,13 @@ export default function CalendarView({ events, settings = {}, onAddEvent, onEdit
                 return (
                     <div 
                         key={monthName}
+                        style={staggerDelay(monthIndex, 18)}
                         onClick={() => {
                             const d = new Date(currentDate.getFullYear(), monthIndex, 1);
                             zoomIn(d, 'month');
                         }}
                         className={`
-                            p-3 rounded-xl border bg-white/5 hover:bg-white/10 cursor-pointer transition-all flex flex-col gap-2
+                            caltemp-pop-in caltemp-lift p-3 rounded-xl border bg-white/5 hover:bg-white/10 cursor-pointer flex flex-col gap-2
                             ${isCurrentMonth ? 'border-blue-500/50 bg-blue-500/10' : 'border-white/5'}
                         `}
                     >
@@ -265,14 +353,10 @@ export default function CalendarView({ events, settings = {}, onAddEvent, onEdit
                             {/* Days */}
                             {Array.from({ length: daysInMonth }).map((_, i) => {
                                 const dayNum = i + 1;
-                                // Performance: Avoid full filter for every day in year view if possible, or accept it for now.
-                                // 365 iterations * N events might be slow if many events.
-                                // Minimal indicator:
-                                const targetDate = new Date(currentDate.getFullYear(), monthIndex, dayNum);
-                                const hasEvent = getOccurrencesOnDate(events, targetDate).length > 0;
+                                const hasEvent = occurrenceIndex.has(currentDate.getFullYear() * 10000 + (monthIndex + 1) * 100 + dayNum);
                                 
                                 return (
-                                    <div key={dayNum} className={`aspect-square flex items-center justify-center rounded-sm ${hasEvent ? 'bg-white/20' : ''}`}>
+                                    <div key={dayNum} className={`aspect-square flex items-center justify-center rounded-sm transition-colors duration-300 ${hasEvent ? 'bg-white/20' : ''}`}>
                                         <span className={hasEvent ? 'text-white' : 'text-white/50'}>{dayNum}</span>
                                     </div>
                                 );
@@ -290,7 +374,7 @@ export default function CalendarView({ events, settings = {}, onAddEvent, onEdit
         const totalRows = Math.ceil(totalSlots / 7);
 
         return (
-            <div className={`flex flex-col h-full gap-2 p-4 overflow-hidden ${direction === 'right' ? 'animate-month-right' : 'animate-month-left'}`}>
+            <div key={rangeStartKey} className={`flex flex-col h-full gap-2 p-4 overflow-hidden ${navAnimation}`}>
                 {/* Days Header */}
                 <div className="grid grid-cols-7 gap-2 mb-2 shrink-0">
                     {DAYS.map((day, i) => (
@@ -325,7 +409,7 @@ export default function CalendarView({ events, settings = {}, onAddEvent, onEdit
                                     }
                                 }}
                                 className={`
-                                    flex flex-col rounded-xl p-2 transition-all cursor-pointer border
+                                    flex flex-col rounded-xl p-2 transition-[background-color,border-color,box-shadow,transform] duration-200 cursor-pointer border active:scale-[0.98]
                                     ${!isCurrentMonth ? 'opacity-30 pointer-events-none border-transparent' : ''}
                                     ${isSelectedDate ? 'bg-white/10 border-white/20' : 'bg-white/5 border-white/5 hover:bg-white/10'}
                                     ${isTodayDate ? 'border-blue-500/50 shadow-[inset_0_0_15px_rgba(59,130,246,0.15)]' : ''}
@@ -343,9 +427,10 @@ export default function CalendarView({ events, settings = {}, onAddEvent, onEdit
                                 <div className="flex-1 flex flex-col gap-1 overflow-visible">
                                      {dayEvents.slice(0, 3).map((ev, idx) => (
                                          <div
-                                            key={idx}
-                                            className="text-[10px] sm:text-xs px-1.5 py-0.5 rounded truncate shadow-sm border"
+                                            key={ev.occurrenceKey || idx}
+                                            className="caltemp-event-in text-[10px] sm:text-xs px-1.5 py-0.5 rounded truncate shadow-sm border"
                                             style={{
+                                                ...staggerDelay(idx, 40),
                                                 backgroundColor: `${ev.color || '#3b82f6'}26`,
                                                 borderColor: `${ev.color || '#3b82f6'}66`,
                                                 color: '#f8fafc',
@@ -373,7 +458,7 @@ export default function CalendarView({ events, settings = {}, onAddEvent, onEdit
         startOfWeek.setDate(currentDate.getDate() - currentDate.getDay());
         
         return (
-            <div className={`flex h-full gap-3 overflow-hidden flex-1 ${direction === 'right' ? 'animate-month-right' : 'animate-month-left'}`}>
+            <div key={rangeStartKey} className={`flex h-full gap-3 overflow-hidden flex-1 ${navAnimation}`}>
                 {Array.from({ length: 7 }).map((_, i) => {
                     const date = new Date(startOfWeek);
                     date.setDate(startOfWeek.getDate() + i);
@@ -395,12 +480,13 @@ export default function CalendarView({ events, settings = {}, onAddEvent, onEdit
                             </div>
                             
                             <div className="flex-1 p-2 space-y-2 overflow-y-auto custom-scrollbar">
-                                {dayEvents.map(event => (
+                                {dayEvents.map((event, idx) => (
                                     <div 
-                                        key={event.id} 
+                                        key={event.occurrenceKey || event.id} 
                                         onClick={(e) => { e.stopPropagation(); onEditEvent(event); }}
-                                        className="px-3 py-2 rounded-xl text-sm cursor-pointer transition-colors shadow-sm border hover:brightness-125"
+                                        className="caltemp-event-in caltemp-lift px-3 py-2 rounded-xl text-sm cursor-pointer shadow-sm border hover:brightness-125"
                                         style={{
+                                            ...staggerDelay(i + idx, 35),
                                             backgroundColor: `${event.color || '#3b82f6'}26`,
                                             borderColor: `${event.color || '#3b82f6'}66`,
                                         }}
@@ -435,12 +521,12 @@ export default function CalendarView({ events, settings = {}, onAddEvent, onEdit
 
     const renderDayView = () => {
         const date = currentDate;
-        const events = getEventsForDay(date); // Not sorted by time strictly needed for rendering, but good to have
+        const dayLayout = layoutDayEvents(getEventsForDay(date));
         const isTodayView = isSameDay(date, now);
         const HOUR_HEIGHT = 80;
 
         return (
-            <div className={`flex flex-col h-full overflow-hidden ${direction === 'right' ? 'animate-month-right' : 'animate-month-left'}`}>
+            <div key={rangeStartKey} className={`flex flex-col h-full overflow-hidden ${navAnimation}`}>
                 {/* Header Actions for Day View */}
                 <div className="flex justify-end px-4 pb-2">
                      <button
@@ -470,21 +556,24 @@ export default function CalendarView({ events, settings = {}, onAddEvent, onEdit
                         ))}
 
                         {/* Events */}
-                        {events.map(event => {
+                        {/* Events: overlapping ones are placed side by side (see layoutDayEvents) */}
+                        <div className="absolute top-0 bottom-0 left-[90px] right-4">
+                        {dayLayout.map(({ event, startMin, endMin, column, columns, span }, idx) => {
                             const d = new Date(event.date);
-                            const startMin = d.getHours() * 60 + d.getMinutes();
-                            const durationMin = 60; // Default duration of 1 hour 
                             const top = (startMin / 60) * HOUR_HEIGHT;
-                            const height = (durationMin / 60) * HOUR_HEIGHT;
+                            const height = ((endMin - startMin) / 60) * HOUR_HEIGHT;
 
                             return (
                                 <div
-                                    key={event.id}
+                                    key={event.occurrenceKey || event.id}
                                     onDoubleClick={(e) => { e.stopPropagation(); onEditEvent(event); }}
-                                    className="absolute left-[90px] right-4 rounded-lg border-l-[3px] px-3 py-2 cursor-pointer hover:z-20 transition-all overflow-hidden group select-none z-10 shadow-sm backdrop-blur-[1px]"
+                                    className="caltemp-event-in caltemp-day-event absolute rounded-lg border-l-[3px] px-3 py-2 cursor-pointer hover:z-20 overflow-hidden group select-none z-10 shadow-sm"
                                     style={{
+                                        ...staggerDelay(idx, 35),
                                         top: `${top}px`,
                                         height: `${height - 2}px`,
+                                        left: `calc(${(column / columns) * 100}% + ${column ? 2 : 0}px)`,
+                                        width: `calc(${(span / columns) * 100}% - ${column ? 2 : 0}px)`,
                                         backgroundColor: `${event.color || '#3b82f6'}26`,
                                         borderColor: event.color || '#3b82f6',
                                     }}
@@ -508,12 +597,13 @@ export default function CalendarView({ events, settings = {}, onAddEvent, onEdit
                                 </div>
                             );
                         })}
+                        </div>
 
                         {/* Current Time Indicator Red Line */}
                         {isTodayView && (
                             <div 
-                                className="absolute left-0 right-0 z-30 pointer-events-none flex items-center"
-                                style={{ top: (now.getHours() * 60 + now.getMinutes()) / 60 * HOUR_HEIGHT }}
+                                className="caltemp-now-line absolute left-0 right-0 top-0 z-30 pointer-events-none flex items-center"
+                                style={{ transform: `translateY(${(now.getHours() * 60 + now.getMinutes()) / 60 * HOUR_HEIGHT}px)` }}
                             >
                                 {/* Floating Time Label */}
                                 <div className="absolute left-2 w-[70px] text-right transform -translate-y-1/2 pr-2">
@@ -554,7 +644,7 @@ export default function CalendarView({ events, settings = {}, onAddEvent, onEdit
             date.setDate(date.getDate() + offset);
             return {
                 date,
-                events: getEventsForDay(date).sort((a, b) => new Date(a.date) - new Date(b.date)),
+                events: getEventsForDay(date),
             };
         }).filter(day => day.events.length > 0);
     }, [currentDate, getEventsForDay, view]);
@@ -577,11 +667,12 @@ export default function CalendarView({ events, settings = {}, onAddEvent, onEdit
                                     <span className="h-px flex-1 bg-white/10" />
                                 </div>
                                 <div className="grid gap-2">
-                                    {day.events.map(event => (
+                                    {day.events.map((event, idx) => (
                                         <button
                                             key={`${event.id}-${event.date}`}
                                             onClick={() => onEditEvent(event)}
-                                            className="w-full text-left p-4 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 transition-colors flex items-center gap-4"
+                                            style={staggerDelay(idx, 40)}
+                                            className="caltemp-event-in caltemp-lift w-full text-left p-4 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 flex items-center gap-4"
                                         >
                                             <div className="w-1.5 self-stretch rounded-full" style={{ backgroundColor: event.color || categoryLegend[event.category]?.color || '#60a5fa' }} />
                                             <div className="flex-1 min-w-0">
@@ -649,7 +740,8 @@ export default function CalendarView({ events, settings = {}, onAddEvent, onEdit
                                     <button
                                         key={`${event.id}-${event.date}`}
                                         onClick={() => onEditEvent(event)}
-                                        className={`text-left rounded-xl border p-4 transition-colors ${sectionIndex === 0 && index === 0 ? 'bg-white/12 border-white/20' : 'bg-white/5 border-white/5 hover:bg-white/10'}`}
+                                        style={staggerDelay(sectionIndex * 2 + index, 40)}
+                                        className={`caltemp-event-in caltemp-lift text-left rounded-xl border p-4 ${sectionIndex === 0 && index === 0 ? 'bg-white/12 border-white/20' : 'bg-white/5 border-white/5 hover:bg-white/10'}`}
                                     >
                                         <div className="flex items-center gap-3">
                                             <span className="w-3 h-3 shrink-0 rounded-full" style={{ backgroundColor: event.color || categoryLegend[event.category]?.color || '#60a5fa' }} />
@@ -733,7 +825,7 @@ export default function CalendarView({ events, settings = {}, onAddEvent, onEdit
                                     <div className="mt-1 text-sm font-semibold text-white">{new Date(day.date).getDate()}</div>
                                 </div>
                                 <div
-                                    className="h-14 rounded-lg transition-all shadow-inner"
+                                    className="h-14 rounded-lg transition-[background-color] duration-500 shadow-inner"
                                     style={{
                                         backgroundColor: `rgba(59, 130, 246, ${0.15 + (day.load / maxLoad) * 0.65})`,
                                         boxShadow: day.load ? 'inset 0 0 22px rgba(255,255,255,0.08)' : undefined,
@@ -758,9 +850,9 @@ export default function CalendarView({ events, settings = {}, onAddEvent, onEdit
                                 </div>
                                 <div className="mt-3 h-2 rounded-full bg-white/5 overflow-hidden">
                                     <div
-                                        className="h-full rounded-full"
+                                        className="caltemp-bar h-full w-full rounded-full"
                                         style={{
-                                            width: `${((stats.byCategory[key] || 0) / maxCategory) * 100}%`,
+                                            transform: `scaleX(${(stats.byCategory[key] || 0) / maxCategory})`,
                                             backgroundColor: meta.color,
                                         }}
                                     />
@@ -775,7 +867,7 @@ export default function CalendarView({ events, settings = {}, onAddEvent, onEdit
 
     const { events: selectedEvents, holiday: selectedHoliday } = useMemo(() => {
         const day = selectedDate.getDate();
-        const dEvents = getOccurrencesOnDate(events, selectedDate);
+        const dEvents = getEventsForDay(selectedDate);
         
         let dHoliday = null;
         if (showHolidays) {
@@ -788,20 +880,22 @@ export default function CalendarView({ events, settings = {}, onAddEvent, onEdit
             dHoliday = holidays.find(h => h.date === dateStr);
         }
         return { events: dEvents, holiday: dHoliday };
-    }, [selectedDate, events, showHolidays, holidays]);
+    }, [selectedDate, getEventsForDay, showHolidays, holidays]);
 
     return (
         <div className="flex h-full bg-transparent text-white overflow-hidden">
             <div className="flex-1 flex flex-col p-4 overflow-hidden">
                 {renderHeader()}
                 
-                {view === 'year' && renderYearView()}
-                {view === 'month' && renderMonthView()}
-                {view === 'week' && renderWeekView()}
-                {view === 'day' && renderDayView()}
-                {view === 'agenda' && renderAgendaView()}
-                {view === 'focus' && renderFocusView()}
-                {view === 'stats' && renderStatsView()}
+                <div key={view} className={`caltemp-view-${viewMotion} flex-1 flex flex-col min-h-0 overflow-hidden`}>
+                    {view === 'year' && renderYearView()}
+                    {view === 'month' && renderMonthView()}
+                    {view === 'week' && renderWeekView()}
+                    {view === 'day' && renderDayView()}
+                    {view === 'agenda' && renderAgendaView()}
+                    {view === 'focus' && renderFocusView()}
+                    {view === 'stats' && renderStatsView()}
+                </div>
             </div>
 
             {/* Day Details Panel - Hide in Day View to avoid duplication, OR keep it? 
@@ -823,3 +917,5 @@ export default function CalendarView({ events, settings = {}, onAddEvent, onEdit
         </div>
     );
 }
+
+export default memo(CalendarView);

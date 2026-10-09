@@ -1,4 +1,4 @@
-import { getNextOccurrence, normalizeEvent } from './events';
+import { getNextOccurrence, normalizeEventCached } from './events';
 
 const SHORT_DELAY_MS = 5000;
 const VISIBLE_IDLE_DELAY_MS = 30000;
@@ -8,7 +8,7 @@ const APPROACHING_WINDOW_MS = 15 * 60 * 1000;
 function nextReminderTime(events = [], now = new Date()) {
   let next = null;
   for (const rawEvent of events) {
-    const event = normalizeEvent(rawEvent);
+    const event = normalizeEventCached(rawEvent);
     if (!event.reminder) continue;
     const occurrence = getNextOccurrence(event, now);
     if (!occurrence) continue;

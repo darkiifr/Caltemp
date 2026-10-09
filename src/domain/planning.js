@@ -1,4 +1,4 @@
-import { getOccurrencesOnDate, getWeekRange, normalizeEvent } from './events';
+import { buildOccurrenceIndex, getWeekRange, normalizeEvent, toDayKey } from './events';
 
 const REVISION_OFFSETS = [
   { days: 30, offsetLabel: 'J-30', label: 'Lancer les fiches de révision' },
@@ -32,8 +32,9 @@ export function buildWeeklySummary(events = [], now = new Date()) {
   const byCategory = {};
   const occurrences = [];
 
+  const index = buildOccurrenceIndex(events, start, end);
   for (let cursor = new Date(start); cursor <= end; cursor.setDate(cursor.getDate() + 1)) {
-    occurrences.push(...getOccurrencesOnDate(events, new Date(cursor)));
+    occurrences.push(...(index.get(toDayKey(cursor)) || []));
   }
 
   for (const event of occurrences) {
@@ -78,8 +79,9 @@ export function buildStats(events = [], referenceDate = new Date()) {
   const days = [];
   const byCategory = {};
 
+  const index = buildOccurrenceIndex(events, start, end);
   for (let cursor = new Date(start); cursor <= end; cursor.setDate(cursor.getDate() + 1)) {
-    const dayEvents = getOccurrencesOnDate(events, new Date(cursor));
+    const dayEvents = index.get(toDayKey(cursor)) || [];
     days.push({
       date: new Date(cursor).toISOString(),
       count: dayEvents.length,
