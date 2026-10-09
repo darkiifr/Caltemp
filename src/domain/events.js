@@ -31,7 +31,6 @@ export const DEFAULT_SETTINGS = {
   portableDataDir: '',
   // Sending event locations to OpenStreetMap Nominatim is opt-in.
   mapAutoGeocode: false,
-  mapProvider: 'osm',
   soundConfig: {
     enabled: true,
     volume: 0.7,

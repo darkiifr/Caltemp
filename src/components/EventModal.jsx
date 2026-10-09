@@ -8,7 +8,6 @@ import CustomSelect from './CustomSelect';
 import { findConflicts, suggestTimeSlots } from '../domain/smartScheduling';
 import { isGeocodableLocation, parseCoordinates, project } from '../domain/geo';
 import { getGeocoder } from '../services/geocoding';
-import { getTileProviderId } from '../domain/mapTiles';
 
 const SlippyMap = lazy(() => import('./SlippyMap'));
 // Default picker view: metropolitan France.
@@ -323,7 +322,6 @@ export default function EventModal({ isOpen, onClose, onSave, onDelete, initialD
                                             fitKey={pickerFocus && geo ? `focus-${pickerFocus}` : ''}
                                             initialView={position ? toView(position.lat, position.lng, 14) : PICKER_DEFAULT_VIEW}
                                             theme={settings.theme === 'light' ? 'light' : 'dark'}
-                                            provider={getTileProviderId(settings)}
                                             onMapClick={({ lat, lng }) => setGeo({ lat, lng, source: 'manual' })}
                                         />
                                     </Suspense>

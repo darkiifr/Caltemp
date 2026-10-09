@@ -3,7 +3,7 @@ import { Minus, Plus, Maximize2 } from 'lucide-react';
 import {
     MAX_ZOOM, MIN_ZOOM, TILE_SIZE, clamp, clusterPoints, fitBounds, getVisibleTiles, unproject, worldSize,
 } from '../domain/geo';
-import { DEFAULT_TILE_PROVIDER, TILE_PROVIDERS } from '../domain/mapTiles';
+import { OSM_TILES } from '../domain/mapTiles';
 
 // A dependency-free slippy map tuned for the WebView:
 // - panning and fractional zoom only rewrite one CSS transform per layer, on the
@@ -84,7 +84,6 @@ function SlippyMap({
     points = [],
     fitKey = '',
     theme = 'dark',
-    provider: providerId = DEFAULT_TILE_PROVIDER,
     selectedKey = '',
     onSelect,
     onMapClick,
@@ -113,7 +112,7 @@ function SlippyMap({
     const [front, setFront] = useState({ z: Math.round(initialView.zoom), ox: 0, oy: 0, tiles: [] });
     const [back, setBack] = useState(null);
     const [settleTick, setSettleTick] = useState(0);
-    const provider = TILE_PROVIDERS[providerId] || TILE_PROVIDERS[DEFAULT_TILE_PROVIDER];
+    const provider = OSM_TILES;
 
     // Transform for a rendered layer, from the level/origin it actually shows.
     const layerTransform = (element) => {
@@ -207,7 +206,7 @@ function SlippyMap({
     // Layers re-mount on zoom-level change: position them before paint.
     useLayoutEffect(() => {
         apply();
-    }, [front.z, back?.z, providerId, apply]);
+    }, [front.z, back?.z, apply]);
 
     const stopAnimation = () => {
         cancelAnimationFrame(animationRef.current);
@@ -469,11 +468,11 @@ function SlippyMap({
             onKeyDown={handleKeyDown}
         >
             {back && (
-                <div ref={backRef} data-z={back.z} data-ox={back.ox} data-oy={back.oy} className="caltemp-map-tiles absolute left-0 top-0 origin-top-left pointer-events-none" key={`back-${providerId}-${back.z}`}>
+                <div ref={backRef} data-z={back.z} data-ox={back.ox} data-oy={back.oy} className="caltemp-map-tiles absolute left-0 top-0 origin-top-left pointer-events-none" key={`back-${back.z}`}>
                     {back.tiles.map(tile => <Tile key={tile.key} tile={tile} ox={back.ox} oy={back.oy} provider={provider} />)}
                 </div>
             )}
-            <div ref={frontRef} data-z={front.z} data-ox={front.ox} data-oy={front.oy} className="caltemp-map-tiles absolute left-0 top-0 origin-top-left pointer-events-none will-change-transform" key={`front-${providerId}-${front.z}`}>
+            <div ref={frontRef} data-z={front.z} data-ox={front.ox} data-oy={front.oy} className="caltemp-map-tiles absolute left-0 top-0 origin-top-left pointer-events-none will-change-transform" key={`front-${front.z}`}>
                 {front.tiles.map(tile => <Tile key={tile.key} tile={tile} ox={front.ox} oy={front.oy} provider={provider} onSettled={handleFrontSettled} />)}
             </div>
             <div ref={markerRef} data-z={front.z} data-ox={front.ox} data-oy={front.oy} className="caltemp-map-markers absolute left-0 top-0 origin-top-left will-change-transform" key={`markers-${front.z}`}>
