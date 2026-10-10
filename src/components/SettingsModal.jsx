@@ -23,7 +23,9 @@ import { DEFAULT_ICS_REFRESH_MINUTES, mergeIcsSyncState, normalizeIcsSources } f
 import { buildImportEventKey, isValidIcsUrl } from '../domain/icsImport';
 import { isHttpsImageUrl, resolveBackgroundImageUrl } from '../utils/background';
 import { getCompatibleWindowEffect, isWindowEffectSupported, WINDOW_EFFECTS } from '../utils/windowEffects';
-import { FREE_MODEL_PREFERENCES, isAiConfigured } from '../services/ai';
+import { isAiConfigured } from '../services/ai';
+import LocalModelSetup from './LocalModelSetup';
+import { LOCAL_AI_CTX_CHOICES, LOCAL_AI_IDLE_TIMEOUT_CHOICES, normalizeLocalAiSettings, stopLocalServer, uninstallLocalAi } from '../services/localAi';
 import { getMostUsedAiModel, normalizeAiUsageStats } from '../domain/aiUsage';
 import { enrichUpdateWithGithubReleaseNotes } from '../domain/updateReleaseNotes';
 
@@ -60,6 +62,7 @@ export default function SettingsModal({
     onAddAndSyncIcsSource,
     onToggleIcsSource,
     onRemoveIcsSource,
+    onLocalAiChange,
 }) {
     const [activeTab, setActiveTab] = useState('general');
     const [appVersion, setAppVersion] = useState('Unknown');
@@ -1196,12 +1199,12 @@ export default function SettingsModal({
                                                 <div className="min-w-0">
                                                     <div className="flex flex-wrap items-center gap-2">
                                                         <h3 className="text-xl font-semibold text-white">Dexter IA</h3>
-                                                        <span className={`rounded-md px-2 py-1 text-xs font-medium ${isAiConfigured() ? 'bg-emerald-400/10 text-emerald-100' : 'bg-white/5 text-gray-300'}`}>
-                                                            {isAiConfigured() ? 'Connecté' : 'Build sans clé'}
+                                                        <span className={`rounded-md px-2 py-1 text-xs font-medium ${isAiConfigured(localSettings.localAi) ? 'bg-emerald-400/10 text-emerald-100' : 'bg-white/5 text-gray-300'}`}>
+                                                            {isAiConfigured(localSettings.localAi) ? 'Modèle local prêt' : 'Modèle à installer'}
                                                         </span>
                                                     </div>
                                                     <p className="mt-2 max-w-2xl text-sm leading-6 text-gray-400">
-                                                        L’assistant utilise automatiquement un routeur maison limité aux modèles gratuits d’OpenRouter. Aucun modèle ni clé API ne peut être saisi dans l’application.
+                                                        Dexter utilise un petit modèle exécuté sur cet ordinateur par llama.cpp. Aucune donnée n’est envoyée à un service d’IA en ligne, aucune clé n’est nécessaire.
                                                     </p>
                                                 </div>
                                             </div>
@@ -1211,6 +1214,87 @@ export default function SettingsModal({
                                                 className={`inline-flex h-11 shrink-0 items-center justify-center rounded-lg px-5 text-sm font-medium transition-colors ${localSettings.aiEnabled !== false ? 'bg-blue-600 text-white hover:bg-blue-500' : 'bg-white/10 text-gray-300 hover:bg-white/15'}`}
                                             >
                                                 {localSettings.aiEnabled !== false ? 'Dexter actif' : 'Dexter coupé'}
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <div className="rounded-xl border border-white/10 bg-white/[0.035] p-6">
+                                        <h3 className="text-lg font-semibold text-white">Modèle local</h3>
+                                        <div className="mt-4">
+                                            <LocalModelSetup
+                                                localAi={localSettings.localAi}
+                                                onChange={(patch) => {
+                                                    handleChange('localAi', { ...normalizeLocalAiSettings(localSettings.localAi), ...patch });
+                                                    // Installing is immediate: remember the chosen model even if the panel is closed without saving.
+                                                    onLocalAiChange?.(patch);
+                                                }}
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div className="rounded-xl border border-white/10 bg-white/[0.035] p-6">
+                                        <h3 className="text-lg font-semibold text-white">Consommation de ressources</h3>
+                                        <p className="mt-1 text-sm text-gray-400">Le modèle n’est chargé que pendant l’utilisation de Dexter. Ces réglages s’appliquent au prochain démarrage du modèle.</p>
+                                        <div className="mt-5 grid gap-4 md:grid-cols-3">
+                                            <label className="block">
+                                                <span className="text-sm font-medium text-white">Libérer la mémoire après</span>
+                                                <select
+                                                    className="mt-2 h-10 w-full rounded-lg border border-white/10 bg-[#181818] px-3 text-sm text-white"
+                                                    value={normalizeLocalAiSettings(localSettings.localAi).idleTimeoutMinutes}
+                                                    onChange={(event) => handleChange('localAi', { ...normalizeLocalAiSettings(localSettings.localAi), idleTimeoutMinutes: Number(event.target.value) })}
+                                                >
+                                                    {LOCAL_AI_IDLE_TIMEOUT_CHOICES.map(minutes => (
+                                                        <option key={minutes} value={minutes}>{minutes} min d’inactivité</option>
+                                                    ))}
+                                                </select>
+                                            </label>
+                                            <label className="block">
+                                                <span className="text-sm font-medium text-white">Cœurs processeur</span>
+                                                <select
+                                                    className="mt-2 h-10 w-full rounded-lg border border-white/10 bg-[#181818] px-3 text-sm text-white"
+                                                    value={normalizeLocalAiSettings(localSettings.localAi).threads}
+                                                    onChange={(event) => handleChange('localAi', { ...normalizeLocalAiSettings(localSettings.localAi), threads: Number(event.target.value) })}
+                                                >
+                                                    <option value={0}>Automatique (économe)</option>
+                                                    {[1, 2, 4, 6, 8].map(count => (
+                                                        <option key={count} value={count}>{count}</option>
+                                                    ))}
+                                                </select>
+                                            </label>
+                                            <label className="block">
+                                                <span className="text-sm font-medium text-white">Mémoire de conversation</span>
+                                                <select
+                                                    className="mt-2 h-10 w-full rounded-lg border border-white/10 bg-[#181818] px-3 text-sm text-white"
+                                                    value={normalizeLocalAiSettings(localSettings.localAi).ctxSize}
+                                                    onChange={(event) => handleChange('localAi', { ...normalizeLocalAiSettings(localSettings.localAi), ctxSize: Number(event.target.value) })}
+                                                >
+                                                    {LOCAL_AI_CTX_CHOICES.map(size => (
+                                                        <option key={size} value={size}>{size.toLocaleString('fr-FR')} tokens{size === 4096 ? ' (recommandé)' : ''}</option>
+                                                    ))}
+                                                </select>
+                                            </label>
+                                        </div>
+                                        <div className="mt-5 flex flex-wrap gap-2">
+                                            <button
+                                                type="button"
+                                                onClick={() => stopLocalServer()}
+                                                className="inline-flex h-10 items-center rounded-lg bg-white/10 px-4 text-sm text-white hover:bg-white/15"
+                                            >
+                                                Décharger le modèle maintenant
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={async () => {
+                                                    if (!window.confirm('Supprimer le moteur llama.cpp et tous les modèles téléchargés ?')) return;
+                                                    try {
+                                                        await uninstallLocalAi();
+                                                    } catch (error) {
+                                                        alert(String(error?.message || error));
+                                                    }
+                                                }}
+                                                className="inline-flex h-10 items-center rounded-lg px-4 text-sm text-red-200 hover:bg-red-400/10"
+                                            >
+                                                Tout désinstaller
                                             </button>
                                         </div>
                                     </div>
@@ -1266,10 +1350,10 @@ export default function SettingsModal({
                                             </div>
 
                                             <div className="rounded-lg border border-white/10 bg-[#181818] p-4">
-                                                <div className="text-sm font-medium text-white">Routeur</div>
-                                                <div className="mt-2 font-mono text-sm text-gray-200">3 modèles gratuits dynamiques</div>
+                                                <div className="text-sm font-medium text-white">Exécution</div>
+                                                <div className="mt-2 font-mono text-sm text-gray-200">llama.cpp · 127.0.0.1</div>
                                                 <div className="mt-4 text-xs leading-5 text-gray-500">
-                                                    Préférés : {FREE_MODEL_PREFERENCES.join(', ')}. Dexter complète automatiquement si l’un n’est plus disponible.
+                                                    Serveur local protégé par une clé aléatoire, arrêté automatiquement après inactivité et à la fermeture de Caltemp.
                                                 </div>
                                             </div>
                                         </div>
@@ -1277,9 +1361,9 @@ export default function SettingsModal({
 
                                     <div className="grid gap-3 md:grid-cols-3">
                                         {[
-                                            ['Commandes sûres', 'Création et modification d’événements avec garde-fous.'],
-                                            ['Contexte Caltemp', 'Catégories, rappels, imports ICS et statistiques locales.'],
-                                            ['Notes', 'Rédaction, correction et autocomplétion dans l’éditeur.'],
+                                            ['Agit dans l’agenda', 'Crée, modifie, supprime (après confirmation) et retrouve vos événements.'],
+                                            ['Pilote Caltemp', 'Change de vue, ouvre les écrans, ajuste les réglages, exporte et synchronise.'],
+                                            ['Planifie', 'Trouve des créneaux libres et résume vos semaines.'],
                                         ].map(([title, desc]) => (
                                             <div key={title} className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
                                                 <div className="text-sm font-medium text-white">{title}</div>

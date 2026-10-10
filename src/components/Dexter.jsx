@@ -1,18 +1,38 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { X } from 'lucide-react';
-import { generateText, isAiConfigured, searchWeb } from '../services/ai';
+import { chatCompletion, isAiConfigured, searchWeb } from '../services/ai';
+import { ensureLocalServer } from '../services/localAi';
 import { playBubbleSound } from '../utils/sound';
 import { PromptInputBox } from './ui/ai-prompt-box';
 import { motion, AnimatePresence } from 'framer-motion';
 import CanvasView from './CanvasView';
-import { Search, Loader2, MessageSquare, CornerDownLeft, Plus, Trash2 } from 'lucide-react';
+import LocalModelSetup, { useLocalAiStatus } from './LocalModelSetup';
+import { Search, Loader2, MessageSquare, CornerDownLeft, Plus, Trash2, HardDrive } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ChevronDown, ChevronUp, Brain } from 'lucide-react';
 import { handleLocalDexterCommand } from '../domain/dexterLocal';
-import { parseDexterAction, removeDexterActionJson, sanitizeDexterReply } from '../domain/dexterActions';
+import { sanitizeDexterReply } from '../domain/dexterActions';
 import { getNextOccurrence } from '../domain/events';
+import { executeDexterTool, toLocalIso } from '../domain/dexterTools';
+import { buildDexterSystemPrompt, runDexterAgent } from '../services/dexterAgent';
 import { normalizeUnclearDexterReply, shouldUseLocalDexterCommand } from '../domain/dexterRouting';
+
+const STREAM_RENDER_INTERVAL_MS = 60;
+const TOOL_STATUS_LABELS = {
+    list_events: 'Consultation de l’agenda…',
+    create_event: 'Création de l’événement…',
+    update_event: 'Modification de l’événement…',
+    delete_event: 'Préparation de la suppression…',
+    find_free_slots: 'Recherche de créneaux libres…',
+    week_summary: 'Analyse de la semaine…',
+    show_calendar: 'Ouverture de l’agenda…',
+    open_panel: 'Ouverture de l’écran…',
+    update_settings: 'Mise à jour des réglages…',
+    export_view: 'Export de la vue…',
+    sync_subscriptions: 'Actualisation des abonnements…',
+    search_web: 'Recherche sur le web…',
+};
 
 const DEXTER_HISTORY_STORAGE_KEY = 'caltemp.dexter.conversations.v1';
 
@@ -118,7 +138,38 @@ const ThoughtBlock = React.memo(({ content }) => {
 });
 ThoughtBlock.displayName = "ThoughtBlock";
 
-const MessageItem = React.memo(({ msg }) => {
+const ConfirmationCard = ({ confirmation, onResolve }) => {
+    const pending = confirmation.status === 'pending';
+    return (
+        <div className="mt-3 rounded-xl border border-amber-300/20 bg-amber-400/[0.06] p-3 text-sm text-white/85">
+            <div>{confirmation.label}</div>
+            {pending ? (
+                <div className="mt-3 flex gap-2">
+                    <button
+                        type="button"
+                        onClick={() => onResolve(true)}
+                        className="rounded-lg bg-red-500/80 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-500"
+                    >
+                        {confirmation.confirmLabel || 'Confirmer'}
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => onResolve(false)}
+                        className="rounded-lg px-3 py-1.5 text-xs text-white/60 hover:bg-white/10 hover:text-white"
+                    >
+                        Annuler
+                    </button>
+                </div>
+            ) : (
+                <div className="mt-2 text-xs text-white/50">
+                    {confirmation.status === 'done' ? 'Fait.' : confirmation.status === 'error' ? 'Échec de l’action.' : 'Annulé.'}
+                </div>
+            )}
+        </div>
+    );
+};
+
+const MessageItem = React.memo(({ msg, onResolveConfirmation }) => {
     const isUser = msg.role === 'user';
 
     return (
@@ -174,6 +225,13 @@ const MessageItem = React.memo(({ msg }) => {
                                 >
                                     {msg.content.replace(/<thought>[\s\S]*?<\/thought>/g, '')}
                                 </ReactMarkdown>
+                                {msg.confirmations?.map((confirmation, index) => (
+                                    <ConfirmationCard
+                                        key={`${msg.id}-${index}`}
+                                        confirmation={confirmation}
+                                        onResolve={(accepted) => onResolveConfirmation?.(msg.id, index, accepted)}
+                                    />
+                                ))}
                                 {msg.isStreaming && (
                                     <motion.span 
                                         animate={{ opacity: [0, 1, 0] }}
@@ -202,70 +260,26 @@ const MessageItem = React.memo(({ msg }) => {
 });
 MessageItem.displayName = "MessageItem";
 
-function getDexterEventDate(event) {
-    const value = event?.date || event?.start || event?.startDate;
-    const date = value ? new Date(value) : null;
-    return date && !Number.isNaN(date.getTime()) ? date : null;
-}
-
-function buildDexterCalendarContext(events = [], settings = {}) {
-    const now = new Date();
-    const categoryLegend = settings?.categoryLegend || {};
-    const upcoming = events
-        .map(event => ({ event, date: getNextOccurrence(event, now) || getDexterEventDate(event) }))
+function upcomingForPrompt(events = [], now = new Date(), limit = 8) {
+    return events
+        .map(event => ({ event, date: getNextOccurrence(event, now) }))
         .filter(item => item.date && item.date >= now)
         .sort((a, b) => a.date - b.date)
-        .slice(0, 40);
-
-    if (!upcoming.length) {
-        return 'Rappels à venir dans Caltemp : aucun événement futur enregistré.';
-    }
-
-    const lines = upcoming.map(({ event, date }) => {
-        const category = event.category || 'sans-categorie';
-        const categoryLabel = categoryLegend[category]?.label || category;
-        const tags = Array.isArray(event.tags) && event.tags.length ? `, tags=${event.tags.join('|')}` : '';
-        return `- id=${event.id} | ${date.toISOString()} | ${event.title || 'Sans titre'} | catégorie=${categoryLabel} | alerte=${event.reminder ? 'oui' : 'non'}${tags}`;
-    });
-
-    return `Rappels à venir dans Caltemp (${upcoming.length}/${events.length} affichés, triés par date) :\n${lines.join('\n')}`;
+        .slice(0, limit)
+        .map(({ event, date }) => ({ id: event.id, title: event.title || 'Sans titre', date: toLocalIso(date) }));
 }
 
-function getDexterContextTerms(input = '') {
-    return input
-        .toLocaleLowerCase('fr-FR')
-        .normalize('NFD')
-        .replace(/\p{Diacritic}/gu, '')
-        .replace(/[^\p{Letter}\p{Number}\s-]/gu, ' ')
-        .split(/\s+/)
-        .map(term => term.trim())
-        .filter(term => term.length >= 3);
+function historyForModel(messages = []) {
+    return messages
+        .filter(message => (message.role === 'user' || message.role === 'assistant') && message.type !== 'error' && message.content?.trim())
+        .slice(-8)
+        .map(message => ({
+            role: message.role,
+            content: message.content.replace(/<thought>[\s\S]*?<\/thought>/g, '').slice(0, 2000),
+        }));
 }
 
-function filterDexterContextEvents(events = [], input = '') {
-    const terms = getDexterContextTerms(input);
-    if (!terms.length) return events;
-    const normalizedEvents = events.map(event => ({
-        event,
-        text: [
-            event?.title,
-            event?.description,
-            event?.category,
-            ...(Array.isArray(event?.tags) ? event.tags : []),
-        ]
-            .filter(Boolean)
-            .join(' ')
-            .toLocaleLowerCase('fr-FR')
-            .normalize('NFD')
-            .replace(/\p{Diacritic}/gu, ''),
-    }));
-    const matching = normalizedEvents
-        .filter(item => terms.some(term => item.text.includes(term)))
-        .map(item => item.event);
-    return matching.length ? matching : events;
-}
-
-export default function Dexter({ onClose, settings, events = [], onAddEvent, onOpenSettingsTab, onExportPng, onExportPdf }) {
+export default function Dexter({ onClose, settings, events = [], onAddEvent, onOpenSettingsTab, onExportPng, onExportPdf, toolHost, onLocalAiChange }) {
     const initialHistoryRef = useRef(null);
     if (!initialHistoryRef.current) initialHistoryRef.current = loadDexterHistoryState();
     const [conversationHistory, setConversationHistory] = useState(initialHistoryRef.current.conversations);
@@ -280,11 +294,20 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent, onO
     const abortControllerRef = useRef(null);
     const referencedEventIdRef = useRef(null);
     const eventsRef = useRef(events);
+    const settingsRef = useRef(settings);
+    settingsRef.current = settings;
+    const toolHostRef = useRef(toolHost);
+    toolHostRef.current = toolHost;
+    const localAiStatus = useLocalAiStatus();
+    const aiReady = isAiConfigured(settings?.localAi);
+    const [showSetup, setShowSetup] = useState(false);
+    const [toolStatus, setToolStatus] = useState('');
+    const isStreaming = messages.some(message => message.isStreaming);
     const quickPrompts = [
         'Résume ma semaine',
-        'Montre les catégories',
-        'Explique mes alertes',
-        'Ouvre les paramètres IA',
+        'Qu’ai-je demain ?',
+        'Trouve-moi un créneau d’une heure demain',
+        'Affiche la vue semaine',
     ];
 
     useEffect(() => {
@@ -296,6 +319,8 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent, onO
     }, []);
 
     useEffect(() => {
+        // Streaming updates arrive many times per second: persist once the answer is complete.
+        if (isStreaming) return;
         setConversationHistory(prev => {
             const exists = prev.some(item => item.id === activeConversationId);
             const base = exists ? prev : [createConversation([]), ...prev];
@@ -311,26 +336,55 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent, onO
             saveDexterHistoryState(updated, activeConversationId);
             return updated;
         });
-    }, [activeConversationId, messages]);
+    }, [activeConversationId, messages, isStreaming]);
 
     useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    }, [messages, isTyping]);
+        // Nothing to follow in an empty conversation (keeps the setup panel in view).
+        if (!messages.length && !isTyping) return;
+        // Smooth scrolling on every streamed chunk keeps the compositor busy: jump while streaming.
+        messagesEndRef.current?.scrollIntoView({ behavior: isStreaming ? 'auto' : 'smooth' });
+    }, [messages, isTyping, isStreaming]);
 
     useEffect(() => {
         eventsRef.current = events;
     }, [events]);
 
+    // Load the model as soon as Dexter is opened, so the first answer does not
+    // wait for it. The native watchdog unloads it again after inactivity.
+    const warmUpKey = aiReady && settings?.aiEnabled !== false ? JSON.stringify(settings?.localAi || {}) : '';
+    useEffect(() => {
+        if (!warmUpKey) return;
+        ensureLocalServer(JSON.parse(warmUpKey)).catch((error) => console.warn('Dexter warm-up failed:', error));
+    }, [warmUpKey]);
 
 
-    const fileToBase64 = (file) => {
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.readAsDataURL(file);
-            reader.onload = () => resolve(reader.result);
-            reader.onerror = error => reject(error);
-        });
-    };
+
+    const resolveConfirmation = React.useCallback(async (messageId, index, accepted) => {
+        const setStatus = (status) => setMessages(prev => prev.map(message => {
+            if (message.id !== messageId || !message.confirmations?.[index]) return message;
+            const confirmations = message.confirmations.map((item, itemIndex) => (itemIndex === index ? { ...item, status } : item));
+            return { ...message, confirmations };
+        }));
+        const message = messages.find(item => item.id === messageId);
+        const confirmation = message?.confirmations?.[index];
+        if (!confirmation || confirmation.status !== 'pending') return;
+        if (!accepted) {
+            setStatus('cancelled');
+            return;
+        }
+        try {
+            if (confirmation.kind === 'delete_event') {
+                const updated = await toolHostRef.current?.deleteEvent?.(confirmation.eventId);
+                eventsRef.current = Array.isArray(updated)
+                    ? updated
+                    : eventsRef.current.filter(event => event.id !== confirmation.eventId);
+            }
+            setStatus('done');
+        } catch (error) {
+            console.error('Dexter confirmation failed:', error);
+            setStatus('error');
+        }
+    }, [messages]);
 
     const handleAbort = React.useCallback(() => {
         if (abortControllerRef.current) {
@@ -417,7 +471,7 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent, onO
         setIsTyping(true);
         if (isSearch) setIsSearching(true);
 
-        const aiAvailable = settings?.aiEnabled !== false && isAiConfigured();
+        const aiAvailable = settings?.aiEnabled !== false && isAiConfigured(settings?.localAi);
         const useLocalCommand = shouldUseLocalDexterCommand({
             source: options.source || 'typed',
             text: cleanValue,
@@ -480,267 +534,144 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent, onO
             return;
         }
 
-
-        if (isAiConfigured()) {
-            try {
-                let aiMessages = [];
-                let userContent = [{ type: "text", text: userMsg.content || "Veuillez analyser ce document." }];
-                if (files.length > 0) {
-                    for (const file of files) {
-                        const base64 = await fileToBase64(file);
-                        if (file.type.startsWith('image/')) {
-                            userContent.push({
-                                type: "image_url",
-                                image_url: { url: base64 }
-                            });
-                        }
-                    }
-                }
-
-                const history = messages.slice(-10).map(m => ({
-                    role: m.role === 'system' ? 'assistant' : m.role,
-                    content: m.content
-                }));
-
-                const now = new Date();
-                const legendLines = Object.entries(settings?.categoryLegend || {})
-                    .map(([key, meta]) => `${key}=${meta?.label || key}`)
-                    .join(', ');
-                const relevantEvents = filterDexterContextEvents(eventsRef.current, userMsg.content).slice(0, 12);
-                const calendarContext = buildDexterCalendarContext(relevantEvents, settings);
-                let systemInstruction = `Tu es Dexter, l'assistant intelligent de Caltemp. Nous sommes le ${now.toLocaleString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}. Tu aides à gérer un calendrier local, des notes, des catégories, des rappels et des imports ICS. Catégories disponibles : ${legendLines || 'cours, devoir, examen, perso, dev'}.\n\n${calendarContext}`;
-                
-                if (isSearch) systemInstruction += "\n\nINFORMATIONS TROUVÉES SUR LE WEB :\nTu dois baser ta réponse sur ces informations contextuelles. NE GÉNÈRE AUCUN JSON NI REQUÊTE DE RECHERCHE, réponds directement à l'utilisateur en langage naturel.";
-                if (isCanvas) systemInstruction += "\nL'utilisateur souhaite utiliser le Canvas pour une réponse détaillée.";
-
-                const systemPrompt = {
-                    role: "system",
-                    content: `${systemInstruction}\n\nDIRECTIVES IMPORTANTES:\n1. Si l'utilisateur demande une information déjà présente dans les rappels à venir ci-dessus, réponds avec ces données locales et ne dis jamais que tu n'as pas accès au calendrier.\n2. Pour créer un rappel, tu DOIS ABSOLUMENT inclure un bloc \`\`\`json avec cette structure exacte : {"action": "create_event", "data": {"title": "Titre", "date": "2026-06-06T12:00:00Z", "category": "perso", "reminder": true}}.\n3. Pour modifier un rappel, tu DOIS inclure les champs demandés, par exemple : {"action": "update_event", "data": {"id": "ID_ici", "title": "Nouveau", "date": "2026-06-06T12:00:00Z", "category": "sport"}}. Utilise uniquement les clés de catégories disponibles.\n4. Si la demande de l'utilisateur nécessite de chercher des informations actualisées ou générales sur internet (météo, actualités, connaissances), tu PEUX et DOIS inclure : {"action": "search_web", "data": {"query": "mots clés de recherche courts"}}. Tu recevras ensuite les résultats dans un nouveau message pour formuler ta réponse finale.\n5. N'explique jamais les champs techniques à l'utilisateur, et ne montre pas de clés internes ou JSON dans le texte visible.\n6. Après une création ou modification, le texte visible doit être un résumé naturel avec titre, date, catégorie et statut d'alerte.\n7. N'invente pas d'action dangereuse.`
-                };
-
-                // --- SEARCH PHASE ---
-                let searchContext = "";
-                if (isSearch) {
-                    const searchQuery = await generateText({
-                        messages: [...history, { role: 'user', content: `Génère uniquement 1 ou 2 mots-clés de recherche très courts pour : "${userMsg.content}"` }],
-                        maxTokens: 80,
-                        signal: abortControllerRef.current?.signal
-                    });
-                    
-                    const searchResults = await searchWeb(searchQuery);
-                    if (searchResults) {
-                        searchContext = searchResults.map(r => `[Source: ${r.title}] ${r.snippet}`).join('\n');
-                    }
-                }
-
-                aiMessages = [systemPrompt, ...history, { role: 'user', content: userContent.length > 1 ? userContent : userMsg.content }];
-
-                let currentIteration = 0;
-                const MAX_ITERATIONS = 3;
-                let finalResponse = "";
-                let actionResult = null;
-                let hadActionJson = false;
-                let assistantMsgId = Date.now() + 2;
-
-                // Loop for handling multi-step AI actions like search_web
-                while (currentIteration < MAX_ITERATIONS) {
-                    currentIteration++;
-                    let iterationResponse = "";
-                    
-                    // --- FINAL RESPONSE (STREAMING) ---
-                    assistantMsgId = Date.now() + 2 + currentIteration;
-                    // Add the empty assistant message immediately
-                    setMessages(prev => [...prev, { id: assistantMsgId, role: 'assistant', content: '', isStreaming: true }]);
-                    
-                    await generateText({
-                        messages: aiMessages,
-                        context: searchContext,
-                        think: isThink,
-                        maxTokens: isCanvas || isThink ? 2200 : 1200,
-                        signal: abortControllerRef.current?.signal,
-                        onChunk: (fullText, chunk, isFirstChunk) => {
-                            if (isFirstChunk) {
-                                setIsTyping(false);
-                                setIsSearching(false);
-                            }
-                            iterationResponse = fullText;
-                            
-                            let displayContent = fullText;
-                            
-                            // Hide create_event JSON
-                            if (displayContent.includes('```json') || displayContent.includes('"action": "create_event"')) {
-                                displayContent = "⏳ Création de l'événement en cours...";
-                            }
-                            
-                            if (displayContent.includes('"action": "search_web"')) {
-                                displayContent = "⏳ Recherche sur le web en cours...";
-                            }
-                            
-                            // Hide leaked search tool JSON
-                            displayContent = displayContent.replace(/Search web\.\{.*?\}/g, '');
-                            displayContent = displayContent.replace(/^\{"query":.*?"source":.*?"\}\s*/g, '');
-                            displayContent = displayContent.replace(/^\{"query":.*?\}\s*/g, '');
-                            displayContent = sanitizeDexterReply(displayContent, settings) || displayContent;
-
-                            setMessages(prev => prev.map(msg => 
-                                msg.id === assistantMsgId ? { ...msg, content: displayContent, isStreaming: true } : msg
-                            ));
-                        }
-                    });
-
-                    actionResult = parseDexterAction(iterationResponse);
-                    hadActionJson = iterationResponse.includes('"action"') || iterationResponse.includes('```json');
-                    finalResponse = iterationResponse;
-
-                    // AI decided to search the web during the stream
-                    if (actionResult.ok && actionResult.action === 'search_web') {
-                        setIsSearching(true);
-                        setMessages(prev => prev.map(msg => 
-                            msg.id === assistantMsgId ? { ...msg, content: "🔍 Recherche sur le web en cours...", isStreaming: false } : msg
-                        ));
-
-                        const query = actionResult.data.query;
-                        const searchResults = await searchWeb(query);
-                        const resultsText = searchResults ? searchResults.map(r => `[Source: ${r.title}] ${r.snippet}`).join('\n') : "Aucun résultat trouvé.";
-                        
-                        // Append AI's intent and the search results to messages
-                        aiMessages.push({ role: 'assistant', content: iterationResponse });
-                        aiMessages.push({ role: 'user', content: `Résultats de la recherche pour "${query}":\n${resultsText}\n\nFormule ta réponse finale à partir de ces informations.` });
-                        searchContext = ""; // Clear context to avoid duplication
-                        
-                        continue;
-                    }
-
-                    // No further actions required by AI loop, break
-                    break;
-                }
-
-                if (actionResult.ok && actionResult.action === 'create_event') {
-                    const finalEvent = {
-                        ...actionResult.data,
-                        id: Date.now().toString(),
-                    };
-
-                    const updatedEvents = await onAddEvent(finalEvent);
-                    if (Array.isArray(updatedEvents)) eventsRef.current = updatedEvents;
-
-                    let dateStr = "Date non spécifiée";
-                    try {
-                        const d = new Date(finalEvent.date);
-                        if (!isNaN(d.getTime())) {
-                            dateStr = d.toLocaleString('fr-FR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-                        } else {
-                            dateStr = finalEvent.date;
-                        }
-                    } catch {
-                        dateStr = finalEvent.date;
-                    }
-
-                    const categoryLabel = settings?.categoryLegend?.[finalEvent.category]?.label || finalEvent.category || 'Sans catégorie';
-                    setMessages(prev => prev.map(msg =>
-                        msg.id === assistantMsgId ? { ...msg, content: `✅ **C'est noté !**\n\n**Titre :** ${finalEvent.title}\n**Date :** ${dateStr}\n**Catégorie :** ${categoryLabel}\n**Alerte :** ${finalEvent.reminder ? 'activée' : 'désactivée'}`, isStreaming: false } : msg
-                    ));
-
-                    if (isSearch) setIsSearching(false);
-                    return;
-                } else if (actionResult.ok && actionResult.action === 'update_event') {
-                    const existingEvent = eventsRef.current.find(event => event.id === actionResult.data.id);
-                    if (!existingEvent) {
-                        setMessages(prev => prev.map(msg =>
-                            msg.id === assistantMsgId ? { ...msg, content: "Je n’ai pas trouvé ce rappel dans Caltemp. Réessaie avec un mot du titre du rappel.", isStreaming: false } : msg
-                        ));
-                        if (isSearch) setIsSearching(false);
-                        return;
-                    }
-
-                    const finalEvent = {
-                        ...existingEvent,
-                        ...actionResult.data,
-                        id: existingEvent.id,
-                    };
-
-                    const updatedEvents = await onAddEvent(finalEvent);
-                    if (Array.isArray(updatedEvents)) eventsRef.current = updatedEvents;
-
-                    let dateStr = "Date inchangée";
-                    try {
-                        const d = new Date(finalEvent.date);
-                        if (!isNaN(d.getTime())) {
-                            dateStr = d.toLocaleString('fr-FR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-                        }
-                    } catch {
-                        dateStr = finalEvent.date || dateStr;
-                    }
-
-                    const categoryLabel = settings?.categoryLegend?.[finalEvent.category]?.label || finalEvent.category || 'Sans catégorie';
-                    setMessages(prev => prev.map(msg =>
-                        msg.id === assistantMsgId ? { ...msg, content: `✅ **Rappel modifié.**\n\n**Titre :** ${finalEvent.title}\n**Date :** ${dateStr}\n**Catégorie :** ${categoryLabel}\n**Alerte :** ${finalEvent.reminder ? 'activée' : 'désactivée'}`, isStreaming: false } : msg
-                    ));
-
-                    if (isSearch) setIsSearching(false);
-                    return;
-                } else if (hadActionJson) {
-                    console.warn("Dexter action ignored:", actionResult.error);
-                }
-
-                // If not an event, display cleaned response
-                let cleanResponse = removeDexterActionJson(finalResponse)
-                    .replace(/Search web\.\{.*?\}/g, '')
-                    .replace(/^\{"query":.*?"source":.*?"\}\s*/g, '')
-                    .replace(/^\{"query":.*?\}\s*/g, '')
-                    .trim();
-                cleanResponse = sanitizeDexterReply(cleanResponse, settings);
-                cleanResponse = normalizeUnclearDexterReply({
-                    userText: cleanValue,
-                    assistantText: cleanResponse,
-                });
-                    
-                if (!cleanResponse && hadActionJson && !actionResult.ok) {
-                    cleanResponse = `Je n’ai pas pu exécuter l’action demandée : ${actionResult.error}`;
-                } else if (!cleanResponse) {
-                    cleanResponse = "Opération terminée.";
-                }
-
-                // Make sure we update the correct assistantMsgId
-                setMessages(prev => {
-                    // Update the last message or create a new one if somehow lost
-                    const msgExists = prev.some(m => m.id === assistantMsgId);
-                    if (msgExists) {
-                        return prev.map(msg => 
-                            msg.id === assistantMsgId ? { ...msg, content: cleanResponse, isStreaming: false } : msg
-                        );
-                    }
-                    return [...prev, { id: assistantMsgId, role: 'assistant', content: cleanResponse, isStreaming: false }];
-                });
-
-                if (isSearch) setIsSearching(false);
-
-                // Move to Canvas if response is long or contains complex content
-                if (isCanvas || finalResponse.length > 1500 || (finalResponse.match(/```/g) || []).length >= 2) {
-                    setCanvasContent(finalResponse);
-                }
-
-            } catch (error) {
-                if (error.name === 'AbortError') return;
-                setMessages(prev => [...prev, { 
-                    id: Date.now(), 
-                    role: 'assistant', 
-                    type: 'error',
-                    content: error.message 
-                }]);
-            } finally {
-                setIsTyping(false);
-                setIsSearching(false);
-                abortControllerRef.current = null;
-            }
-        } else {
-            setMessages(prev => [...prev, { 
-                id: Date.now(), 
-                role: 'assistant', 
+        if (!aiAvailable) {
+            setShowSetup(true);
+            setMessages(prev => [...prev, {
+                id: Date.now() + 1,
+                role: 'assistant',
                 type: 'error',
-                    content: "Dexter peut déjà répondre aux commandes locales, mais l’intégration IA n’est pas configurée dans ce build."
+                content: "Je sais déjà gérer les commandes simples (créer, modifier, résumer…), mais pour le reste il me faut mon modèle local. Installez-le ci-dessous : il fonctionne hors ligne, sur cet ordinateur.",
             }]);
             setIsTyping(false);
+            setIsSearching(false);
+            abortControllerRef.current = null;
+            return;
+        }
+
+        const signal = abortControllerRef.current?.signal;
+        const assistantMsgId = Date.now() + 2;
+        const deferred = [];
+        let pendingText = '';
+        let flushTimer = null;
+        const flush = () => {
+            flushTimer = null;
+            const visible = sanitizeDexterReply(pendingText, settings) || pendingText;
+            setMessages(prev => prev.map(msg => (msg.id === assistantMsgId ? { ...msg, content: visible } : msg)));
+        };
+        // Coalesce streamed tokens: one render every STREAM_RENDER_INTERVAL_MS instead of one per token.
+        const scheduleFlush = (text) => {
+            pendingText = text;
+            if (!flushTimer) flushTimer = setTimeout(flush, STREAM_RENDER_INTERVAL_MS);
+        };
+
+        try {
+            const now = new Date();
+            let system = buildDexterSystemPrompt({ now, settings, upcoming: upcomingForPrompt(eventsRef.current, now) });
+            if (isThink) {
+                system += "\n\nRéfléchis d’abord étape par étape dans des balises <thought>...</thought>, puis donne ta réponse.";
+            }
+            if (isCanvas) {
+                system += "\n\nL’utilisateur veut une réponse détaillée et structurée en Markdown.";
+            }
+
+            let userText = cleanValue;
+            if (files.length > 0) {
+                userText += `\n\n(Pièces jointes ignorées : le modèle local ne lit que le texte. Fichiers : ${files.map(file => file.name).join(', ')})`;
+            }
+            if (isSearch) {
+                const results = await searchWeb(cleanValue);
+                if (results) {
+                    userText += `\n\nRésultats web :\n${results.slice(0, 5).map(result => `- ${result.title} : ${result.snippet}`).join('\n')}`;
+                }
+                setIsSearching(false);
+            }
+
+            setMessages(prev => [...prev, { id: assistantMsgId, role: 'assistant', content: '', isStreaming: true }]);
+
+            // Actions that replace Dexter on screen run once the answer is saved,
+            // otherwise Dexter would unmount in the middle of the conversation.
+            const host = {
+                ...(toolHostRef.current || {}),
+                navigate: (request) => deferred.push(() => toolHostRef.current?.navigate?.(request)),
+                exportView: async (format) => {
+                    deferred.push(() => toolHostRef.current?.exportView?.(format));
+                },
+                openPanel: (panel, options) => {
+                    if (panel === 'new_event') deferred.push(() => toolHostRef.current?.openPanel?.(panel, options));
+                    else toolHostRef.current?.openPanel?.(panel, options);
+                },
+                getEvents: () => eventsRef.current,
+                getSettings: () => settingsRef.current,
+                saveEvent: async (event) => {
+                    const updated = await onAddEvent(event);
+                    if (Array.isArray(updated)) eventsRef.current = updated;
+                    referencedEventIdRef.current = event.id;
+                    return updated;
+                },
+                searchWeb,
+            };
+
+            const result = await runDexterAgent({
+                messages: [
+                    { role: 'system', content: system },
+                    ...historyForModel(messages),
+                    { role: 'user', content: userText },
+                ],
+                signal,
+                complete: ({ messages: requestMessages, tools, onDelta }) => chatCompletion({
+                    messages: requestMessages,
+                    tools,
+                    settings: settings?.localAi,
+                    signal,
+                    maxTokens: isCanvas || isThink ? 1600 : 700,
+                    temperature: isThink ? 0.6 : 0.3,
+                    onDelta: (fullText) => {
+                        setIsTyping(false);
+                        onDelta(fullText);
+                    },
+                }),
+                onText: scheduleFlush,
+                onToolStart: (name) => setToolStatus(TOOL_STATUS_LABELS[name] || 'Action en cours…'),
+                executeTool: (name, args) => executeDexterTool(name, args, host),
+            });
+
+            clearTimeout(flushTimer);
+            const displays = result.actions.map(action => action.display).filter(Boolean);
+            let text = sanitizeDexterReply(result.text || '', settings);
+            text = normalizeUnclearDexterReply({ userText: cleanValue, assistantText: text });
+            const content = [...displays, text].filter(Boolean).join('\n\n')
+                || (result.confirmations.length ? 'Confirmez l’action ci-dessous.' : 'C’est fait.');
+
+            setMessages(prev => prev.map(msg => (msg.id === assistantMsgId
+                ? {
+                    ...msg,
+                    content,
+                    isStreaming: false,
+                    confirmations: result.confirmations.map(item => ({ ...item, status: 'pending' })),
+                }
+                : msg)));
+
+            if (deferred.length) {
+                setTimeout(() => deferred.forEach(run => run()), 200);
+            } else if (isCanvas || content.length > 1500 || (content.match(/```/g) || []).length >= 2) {
+                setCanvasContent(content);
+            }
+        } catch (error) {
+            clearTimeout(flushTimer);
+            if (error?.name === 'AbortError' || signal?.aborted) {
+                setMessages(prev => prev.map(msg => (msg.id === assistantMsgId ? { ...msg, isStreaming: false } : msg)));
+                return;
+            }
+            const message = String(error?.message || error);
+            setMessages(prev => [
+                ...prev.filter(msg => msg.id !== assistantMsgId || msg.content),
+                { id: Date.now(), role: 'assistant', type: 'error', content: message },
+            ].map(msg => (msg.id === assistantMsgId ? { ...msg, isStreaming: false } : msg)));
+        } finally {
+            setToolStatus('');
+            setIsTyping(false);
+            setIsSearching(false);
+            abortControllerRef.current = null;
         }
     };
 
@@ -793,6 +724,17 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent, onO
                         <div>
                             <h1 className="text-xl font-semibold tracking-tight text-white">Dexter</h1>
                         </div>
+                        <button
+                            type="button"
+                            onClick={() => setShowSetup(value => !value)}
+                            className={`ml-1 inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] ${aiReady ? 'border-emerald-300/15 bg-emerald-400/[0.06] text-emerald-100/80' : 'border-white/10 bg-white/5 text-white/50'}`}
+                            title="Modèle local de Dexter"
+                        >
+                            <HardDrive className="h-3 w-3" />
+                            {aiReady
+                                ? `Local · ${localAiStatus?.models?.find(model => model.id === (settings?.localAi?.modelId))?.label || 'modèle installé'}`
+                                : 'Modèle local à installer'}
+                        </button>
                         {isSearching && (
                             <div className="flex items-center gap-2 px-3 py-1 bg-white/5 text-white/50 border border-white/5 rounded-md text-[10px] font-medium uppercase tracking-wider animate-pulse ml-2">
                                 <Search className="w-3 h-3" />
@@ -822,6 +764,19 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent, onO
                 {/* Messages Area */}
                 <div className="flex-1 overflow-y-auto p-6 md:p-10 custom-scrollbar scroll-smooth">
                     <div className="max-w-3xl mx-auto space-y-10">
+                        {(showSetup || (!aiReady && messages.length === 0)) && settings?.aiEnabled !== false && (
+                            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
+                                <div className="mb-3 flex items-center justify-between gap-3">
+                                    <h2 className="text-base font-semibold text-white">Modèle local de Dexter</h2>
+                                    {showSetup && (
+                                        <button type="button" onClick={() => setShowSetup(false)} className="rounded-lg p-1 text-white/40 hover:bg-white/10 hover:text-white" title="Masquer">
+                                            <X className="h-4 w-4" />
+                                        </button>
+                                    )}
+                                </div>
+                                <LocalModelSetup localAi={settings?.localAi} onChange={onLocalAiChange} />
+                            </div>
+                        )}
                         {messages.length === 0 && (
                             <div className="flex flex-col items-center justify-center py-16 text-center">
                                 <div className="p-5 bg-white/5 rounded-full border border-white/5 shadow-2xl">
@@ -829,7 +784,7 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent, onO
                                 </div>
                                 <div className="mt-4">
                                     <h2 className="text-xl font-medium text-white">Comment puis-je vous aider ?</h2>
-                                    <p className="text-sm text-white/40 mt-1 max-w-sm">Créez un événement, analysez vos rappels ou ouvrez un flux de réglage sans quitter Caltemp.</p>
+                                    <p className="text-sm text-white/40 mt-1 max-w-sm">Créez, déplacez ou supprimez des événements, trouvez un créneau, changez de vue ou de réglage : Dexter agit directement dans Caltemp, hors ligne.</p>
                                 </div>
                                 <div className="mt-6 grid w-full max-w-xl gap-2 sm:grid-cols-2">
                                     {quickPrompts.map((prompt) => (
@@ -848,7 +803,7 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent, onO
 
                         <AnimatePresence mode="popLayout">
                             {messages.filter(m => m.role === 'user' || m.content.length > 0).map((msg) => (
-                                <MessageItem key={msg.id} msg={msg} />
+                                <MessageItem key={msg.id} msg={msg} onResolveConfirmation={resolveConfirmation} />
                             ))}
                         </AnimatePresence>
 
@@ -865,7 +820,14 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent, onO
                             </motion.div>
                         )}
 
-                        {isTyping && !isSearching && !messages.some(m => m.isStreaming) && (
+                        {toolStatus && (
+                            <div className="flex items-center gap-2 text-sm text-white/50">
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                                {toolStatus}
+                            </div>
+                        )}
+
+                        {isTyping && !isSearching && !toolStatus && !messages.some(m => m.isStreaming && m.content) && (
                             <motion.div 
                                 initial={{ opacity: 0, y: 10 }} 
                                 animate={{ opacity: 1, y: 0 }}
@@ -877,7 +839,7 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent, onO
                                         <motion.div animate={{ opacity: [0.3, 1, 0.3] }} transition={{ repeat: Infinity, duration: 1.2, delay: 0.2 }} className="w-1.5 h-1.5 bg-white/40 rounded-full" />
                                         <motion.div animate={{ opacity: [0.3, 1, 0.3] }} transition={{ repeat: Infinity, duration: 1.2, delay: 0.4 }} className="w-1.5 h-1.5 bg-white/40 rounded-full" />
                                     </div>
-                                    <span className="text-sm font-medium text-white/60">Dexter rédige...</span>
+                                    <span className="text-sm font-medium text-white/60">Dexter réfléchit…</span>
                                 </div>
                             </motion.div>
                         )}

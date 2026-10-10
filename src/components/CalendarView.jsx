@@ -50,7 +50,7 @@ function getVisibleRange(view, currentDate) {
     return [new Date(y, m, d), new Date(y, m, d)];
 }
 
-function CalendarView({ events, settings = {}, onAddEvent, onEditEvent, onDeleteEvent, onViewChange, onSettingsPatch, showHolidays = true, showNamedays = true }) {
+function CalendarView({ events, settings = {}, onAddEvent, onEditEvent, onDeleteEvent, onViewChange, onSettingsPatch, showHolidays = true, showNamedays = true, navigationRequest = null }) {
     const [currentDate, setCurrentDate] = useState(new Date());
     const [selectedDate, setSelectedDate] = useState(new Date());
     const [view, setView] = useState('month'); // 'year', 'month', 'week', 'day', 'agenda', 'focus', 'stats'
@@ -209,6 +209,19 @@ function CalendarView({ events, settings = {}, onAddEvent, onEditEvent, onDelete
         observer.observe(container);
         return () => observer.disconnect();
     }, [view]);
+
+    // External navigation (Dexter's show_calendar tool): applied once per request.
+    const appliedNavigationRef = useRef(null);
+    useEffect(() => {
+        if (!navigationRequest || appliedNavigationRef.current === navigationRequest) return;
+        appliedNavigationRef.current = navigationRequest;
+        const target = navigationRequest.date ? new Date(navigationRequest.date) : null;
+        if (target && !Number.isNaN(target.getTime())) {
+            setCurrentDate(target);
+            setSelectedDate(target);
+        }
+        if (navigationRequest.view) changeView(navigationRequest.view, 'zoom-in');
+    }, [navigationRequest, changeView]);
 
     const navAnimation = direction === 'right' ? 'animate-month-right' : 'animate-month-left';
 

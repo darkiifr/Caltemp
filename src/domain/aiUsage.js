@@ -39,7 +39,7 @@ export function normalizeAiUsageStats(stats = {}) {
 export function recordAiUsage(stats = {}, event = {}) {
   const current = normalizeAiUsageStats(stats);
   const usage = event.usage || {};
-  const modelId = event.actualModel || event.model || 'openrouter/free';
+  const modelId = event.actualModel || event.model || 'local';
   const requestedAt = event.requestedAt || new Date().toISOString();
   const promptTokens = toCount(usage.prompt_tokens ?? usage.promptTokens);
   const completionTokens = toCount(usage.completion_tokens ?? usage.completionTokens);

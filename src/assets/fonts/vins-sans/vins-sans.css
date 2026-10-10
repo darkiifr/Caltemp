@@ -1,6 +1,12 @@
 /* Vins Sans 2.000 (Vins Studio) — SIL Open Font License 1.1, voir OFL.txt.
    Source : https://github.com/VinsStudio/VinsSans (dist/).
-   Polices embarquées dans le bundle : aucune requête réseau au démarrage. */
+   Polices embarquées dans le bundle : aucune requête réseau au démarrage.
+
+   VinsSansPro-Latin.woff2 est dérivé de VinsSansPro.woff2 (axe wdth figé à 100,
+   jamais utilisé par l'interface ; jeu de caractères latin) : ~600 Ko au lieu de
+   ~2 Mo à décoder au démarrage. La police complète reste déclarée pour les autres
+   écritures : le WebView ne la charge que si un texte en a besoin.
+   Voir FONTLOG.txt pour régénérer le sous-ensemble. */
 @font-face {
   font-family: "Vins Sans Pro";
   src: url("./VinsSansPro.woff2") format("woff2");
@@ -8,6 +14,19 @@
   font-stretch: 75% 112.5%;
   font-style: normal;
   font-display: swap;
+}
+
+/* Déclarée en dernier : pour un même caractère, c'est elle que le navigateur
+   essaie d'abord (CSS Fonts 4, plages unicode qui se recouvrent). */
+@font-face {
+  font-family: "Vins Sans Pro";
+  src: url("./VinsSansPro-Latin.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0000-024F, U+0259, U+02B0-02FF, U+0300-036F, U+1E00-1EFF,
+    U+2000-206F, U+20A0-20CF, U+2100-214F, U+2190-21FF, U+2200-22FF,
+    U+2460-24FF, U+25A0-25FF, U+2600-27BF, U+FEFF, U+FFFD;
 }
 
 @font-face {

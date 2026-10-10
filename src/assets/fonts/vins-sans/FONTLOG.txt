@@ -49,3 +49,13 @@ ChangeLog
 - Build and verification scripts added (build.py, verify.py).
 - Option B ("signature", preview only, not shipped as VinsSans): compact f and t
   (cv12, cv13) and round quotes/commas (ss03) made default via calt.
+
+Caltemp subset (VinsSansPro-Latin.woff2)
+- Derived from VinsSansPro.woff2 by Caltemp, outlines untouched:
+    fonttools varLib.instancer VinsSansPro.woff2 wdth=100 -o pinned.ttf
+    pyftsubset pinned.ttf --layout-features='*' --name-IDs='*' --flavor=woff2 \
+      --output-file=VinsSansPro-Latin.woff2 \
+      --unicodes="U+0000-024F,U+0259,U+02B0-02FF,U+0300-036F,U+1E00-1EFF,U+2000-206F,U+20A0-20CF,U+2100-214F,U+2190-21FF,U+2200-22FF,U+2460-24FF,U+25A0-25FF,U+2600-27BF,U+FEFF,U+FFFD"
+- Keeps the wght and opsz axes. Loaded first for Latin text (see vins-sans.css);
+  the full VinsSansPro.woff2 stays available for other scripts.
+- Re-run these commands after updating VinsSansPro.woff2 from the font repository.

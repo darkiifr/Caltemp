@@ -1,5 +1,5 @@
 const WEB_INTENT_PATTERN = /\b(cherche|recherche|trouve)\b.*\b(internet|web|net|ligne|google)\b|\b(météo|meteo|actualité|actualités|actualite|actualites|news|infos|recette|définition|definition|traduis)\b|^(qui est|c'est quoi|qu'est-ce que|qu'est ce que|comment faire|pourquoi)\b/i;
-const SETTINGS_INTENT_PATTERN = /\b(paramètres|parametres|config|réglages|reglages)\b.*\b(ia|dexter|openrouter|intelligence artificielle)\b/i;
+const SETTINGS_INTENT_PATTERN = /\b(paramètres|parametres|config|réglages|reglages)\b.*\b(ia|dexter|modèle|modele|intelligence artificielle)\b/i;
 const EXPORT_INTENT_PATTERN = /\bexport\b.*\b(png|pdf)\b/i;
 
 export function classifyDexterIntent(text = '') {
