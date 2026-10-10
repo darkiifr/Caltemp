@@ -25,6 +25,7 @@ Caltemp does not integrate any third-party tracking, advertising, or analytics s
 
 Some features contact external services, only when you use them:
 
+- **Dexter assistant**: the AI model runs entirely on your device (llama.cpp). Your messages and calendar data are never sent to an AI service. Installing Dexter downloads the llama.cpp engine from GitHub (`github.com/ggml-org/llama.cpp`) and the model file you choose from Hugging Face (`huggingface.co`); these downloads reveal your IP address to those hosts. Web search inside Dexter, when used, sends the search text to DuckDuckGo.
 - **ICS subscriptions**: Caltemp downloads the calendar URLs you subscribe to, from the servers that host them.
 - **Reminders map**: map tiles are loaded from OpenStreetMap (`tile.openstreetmap.org`). Like any image download, this reveals the area of the map being viewed and your IP address to the tile server.
 - **Place lookup (geocoding)**: when you click "Localiser" in the event editor or on the map, or enable "Localiser automatiquement les nouveaux lieux", the **text of the event location only** (never the title, description or date) is sent to OpenStreetMap Nominatim (`nominatim.openstreetmap.org`) to find its coordinates. Automatic lookup is off by default. Results are cached locally in `geocache.json`.

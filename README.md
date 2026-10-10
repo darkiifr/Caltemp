@@ -10,7 +10,7 @@ Caltemp est une application de calendrier desktop moderne construite avec React,
 - Abonnements ICS synchronisés en continu (jusqu'à chaque minute) : requêtes conditionnelles HTTP, fuseaux TZID, récurrences complexes (COUNT/UNTIL/EXDATE, occurrences déplacées), liens `webcal://`, et modifications locales préservées.
 - Carte des rappels : vue « Carte » qui place les événements ayant un lieu (adresse, coordonnées, lien de carte ou épingle posée dans l'éditeur), moteur de carte maison sans dépendance, fond OpenStreetMap gratuit (sans clé API).
 - Notifications locales avec toast applicatif et notification native.
-- Assistant Dexter pour créer des événements et organiser les informations.
+- Assistant Dexter hors ligne (petit modèle local exécuté par llama.cpp, installé à la demande) : il crée, modifie et retrouve les événements, propose des créneaux, change de vue et pilote les réglages.
 - Notes intégrées avec éditeur riche, pièces jointes et export Markdown.
 - Personnalisation du thème sombre, du fond Unsplash et des sons.
 - Écosystème d'extensions : SDK thèmes/plugins, marketplace GitHub et documentation développeur versionnée.

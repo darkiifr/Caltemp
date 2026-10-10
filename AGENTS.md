@@ -123,11 +123,14 @@ Run from repository root unless noted.
 - Developer docs are under `docs/extensions/`.
 - Manifest schema is `public/schemas/caltemp-extension-manifest.schema.json`.
 
-### 6) AI assistant path (Dexter)
-- `src/components/Dexter.jsx` provides:
-  - local natural-language command parsing for quick event creation
-  - fallback to OpenRouter chat completion through `src/services/ai.js`
-- API key/model are read from saved settings configured in Settings modal.
+### 6) AI assistant path (Dexter) — local model via llama.cpp
+- Nothing is sent to an online AI service. Dexter runs a small GGUF model (default Qwen2.5 1.5B Instruct Q4_K_M) with llama.cpp's `llama-server`.
+- Nothing ships in the installer: the user is offered the download (first-run card in `App.jsx`, Dexter's setup panel, Settings › IA via `src/components/LocalModelSetup.jsx`).
+- Native side `src-tauri/src/local_ai.rs`: model catalog, pinned llama.cpp build (`LLAMA_CPP_BUILD`), downloads into `AppData/local-ai/` with SHA-256 checks (GitHub asset digest, Hugging Face `X-Linked-Etag`), server lifecycle. The server listens on 127.0.0.1 with a random API key, is started on demand (`local_ai_ensure_server`), stopped by an idle watchdog (`settings.localAi.idleTimeoutMinutes`) and on app exit.
+- `src/services/localAi.js` wraps the commands; `src/services/ai.js` is the OpenAI-compatible streaming client (tool calls included).
+- Agent loop: `src/services/dexterAgent.js`. Tools the model can call: `src/domain/dexterTools.js` (list/create/update/delete events, free slots, week summary, calendar view, panels, whitelisted settings, export, ICS sync, web search). App capabilities reach the tools through the `toolHost` built in `App.jsx`. Destructive tools return a `confirmation` the user approves in the chat; never let the model delete directly.
+- Simple commands still go through the deterministic parser `src/domain/dexterLocal.js` first (no model load needed).
+- To change the llama.cpp build, check the asset names on its release page and the `llama-server` flags used in `spawn_server`.
 
 ### 7) Discord Rich Presence
 - `src/services/discordRpc.js` builds privacy-safe presence payloads.
@@ -140,6 +143,7 @@ Run from repository root unless noted.
 - Native layer responsibilities include:
   - window visual effects command exposed to JS: `set_window_effect`
   - Discord RPC commands: `discord_rpc_update`, `discord_rpc_clear`
+  - Dexter local model commands: `local_ai_*` (`src-tauri/src/local_ai.rs`)
   - tray icon/menu behavior
   - single-instance behavior
   - plugin registration (fs/http/notification/os/shell/updater/autostart/process/etc.)
@@ -150,11 +154,12 @@ Run from repository root unless noted.
 
 ## Codebase-specific implementation notes
 - UI language/content is predominantly French; keep new user-facing text consistent.
-- Typography is **Vins Sans** (https://github.com/VinsStudio/VinsSans, OFL), bundled locally in `src/assets/fonts/vins-sans/` (WOFF2 + `OFL.txt`/`FONTLOG.txt`) and loaded from `src/main.jsx`. Use the `--caltemp-font-sans` / `--caltemp-font-mono` tokens (or Tailwind `font-sans` / `font-mono`) rather than hard-coding a family; never load fonts from a CDN. Vins Sans Pro has an `opsz` axis (`font-optical-sizing: auto`), so headings need no separate display font. To update, copy the new files from the font repo's `dist/`.
-- Several features depend on Tauri plugins and won’t behave correctly in browser-only Vite mode (notifications, fs persistence, autostart, updater, window effects, extensions install flow, Discord RPC). Prefer `npm run tauri dev` when touching these areas.
+- Typography is **Vins Sans** (https://github.com/VinsStudio/VinsSans, OFL), bundled locally in `src/assets/fonts/vins-sans/` (WOFF2 + `OFL.txt`/`FONTLOG.txt`) and loaded from `src/main.jsx`. Use the `--caltemp-font-sans` / `--caltemp-font-mono` tokens (or Tailwind `font-sans` / `font-mono`) rather than hard-coding a family; never load fonts from a CDN. Vins Sans Pro has an `opsz` axis (`font-optical-sizing: auto`), so headings need no separate display font. To update, copy the new files from the font repo's `dist/`, then regenerate the Latin subset `VinsSansPro-Latin.woff2` with the commands in `FONTLOG.txt` (it is what the WebView loads for Latin text).
+- Several features depend on Tauri plugins and won’t behave correctly in browser-only Vite mode (notifications, fs persistence, autostart, updater, window effects, extensions install flow, Discord RPC, Dexter's local model). Prefer `npm run tauri dev` when touching these areas.
 - Do not open external browsers for internal app views or normal app flows. Caltemp is a Tauri desktop app; internal journeys must stay inside the app. External links are only acceptable when explicitly user-triggered and justified, such as opening a GitHub source/changelog.
 - The custom titlebar must keep native desktop behavior: correct Tauri drag regions (`data-tauri-drag-region`), working minimize/maximize/close controls, and no browser-first assumptions.
 - Desktop/WebView rendering is authoritative. If Vite browser mode and Tauri WebView disagree, investigate WebView theme, transparency, color-scheme, Tauri window effects, and CSS variables before changing behavior.
+- Resource use matters: heavy surfaces (Settings, Dexter, import wizard, event editor, reminders list, export, ICS parsing) are lazy-loaded; keep framer-motion and similar libraries out of the startup chunk (`vite.config.js`), pause timers while the window is hidden, and avoid per-token or per-frame work (Dexter coalesces streamed renders and persists history once an answer is complete).
 - `eslint.config.js` ignores `dist/**`, `node_modules/**`, `src-tauri/**`, and `scripts/**`; lint scope is primarily frontend JS/JSX.
 
 ## Agent instruction sources in this repo

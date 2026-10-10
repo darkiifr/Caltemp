@@ -3,8 +3,9 @@ import react from "@vitejs/plugin-react";
 import path from "node:path";
 
 const host = process.env.TAURI_DEV_HOST;
+// framer-motion stays out of this startup chunk: only lazily loaded surfaces
+// (Dexter, Settings) use it.
 const uiVendorModules = [
-  "framer-motion",
   "lucide-react",
   "@radix-ui/react-dialog",
   "@radix-ui/react-tooltip",

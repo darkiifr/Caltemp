@@ -332,7 +332,7 @@ export function handleLocalDexterCommand(input, context = {}) {
 
   if (
     (normalized.includes('param') || normalized.includes('config'))
-    && (normalized.includes('ia') || normalized.includes('intelligence artificielle') || normalized.includes('openrouter') || normalized.includes('dexter'))
+    && (normalized.includes('ia') || normalized.includes('intelligence artificielle') || normalized.includes('modele') || normalized.includes('dexter'))
   ) {
     return {
       handled: true,

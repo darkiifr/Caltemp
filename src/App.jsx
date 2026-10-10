@@ -1,5 +1,5 @@
 import React, { Suspense, lazy, useCallback, useState, useEffect, useMemo, useRef } from "react";
-import { Calendar as CalendarIcon, Settings, Bot, ListTodo, CalendarArrowDown, X } from 'lucide-react';
+import { Calendar as CalendarIcon, Settings, Bot, ListTodo, CalendarArrowDown, HardDrive, X } from 'lucide-react';
 import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { invoke } from '@tauri-apps/api/core';
@@ -8,8 +8,6 @@ import { type } from '@tauri-apps/plugin-os';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import CalendarView from "./components/CalendarView";
-import EventModal from "./components/EventModal";
-import RemindersModal from "./components/RemindersModal";
 import Titlebar from "./components/Titlebar";
 import ContextMenu from "./components/ContextMenu";
 import NotificationToast from "./components/NotificationToast";
@@ -29,7 +27,7 @@ import { addDismissedIcsKey, findIcsSourceByUrl, mergeIcsSyncState, normalizeIcs
 import { ICS_SYNC_CONCURRENCY, computeNextIcsSyncDelay, isIcsSourceDue, mapWithConcurrency } from "./domain/icsScheduler";
 import { applyNotificationMarks, buildReminderNotifications, snoozeEventOccurrence } from "./domain/reminders";
 import { computeReminderCheckDelay } from "./domain/reminderScheduler";
-import { applyIcsFetchResult, diffEventFields, fetchIcsSource, upsertIcsSourceEvents } from "./services/icsSync";
+import { getCachedLocalAiStatus, isModelReady, refreshLocalAiStatus, subscribeLocalAiStatus } from "./services/localAi";
 import { FastAverageColor } from "fast-average-color";
 import { resolveBackgroundImageUrl } from "./utils/background";
 import { getCompatibleWindowEffect } from "./utils/windowEffects";
@@ -40,7 +38,11 @@ const SettingsModal = lazy(() => import("./components/SettingsModal"));
 const Dexter = lazy(() => import("./components/Dexter"));
 const ExtensionGalleryModal = lazy(() => import("./components/ExtensionGalleryModal"));
 const CalendarImportWizard = lazy(() => import("./components/CalendarImportWizard"));
+const EventModal = lazy(() => import("./components/EventModal"));
+const RemindersModal = lazy(() => import("./components/RemindersModal"));
 const loadExportView = () => import("./utils/exportView");
+// ICS parsing (ical.js) is only needed once a subscription syncs or a subscribed event is edited.
+const loadIcsSync = () => import("./services/icsSync");
 
 function getIcsFetcher() {
   const fetcher = window.__TAURI_INTERNALS__ ? tauriFetch : globalThis.fetch;
@@ -59,6 +61,13 @@ function App() {
   const [isDexterOpen, setIsDexterOpen] = useState(false);
   const [isEventModalOpen, setIsEventModalOpen] = useState(false);
   const [isRemindersOpen, setIsRemindersOpen] = useState(false);
+  // Modals are fetched on first use, then kept mounted for their close animations.
+  const [hasOpenedEventModal, setHasOpenedEventModal] = useState(false);
+  if (isEventModalOpen && !hasOpenedEventModal) setHasOpenedEventModal(true);
+  const [hasOpenedReminders, setHasOpenedReminders] = useState(false);
+  if (isRemindersOpen && !hasOpenedReminders) setHasOpenedReminders(true);
+  const [calendarNavigation, setCalendarNavigation] = useState(null);
+  const [localAiStatus, setLocalAiStatus] = useState(getCachedLocalAiStatus);
   const [selectedDate, setSelectedDate] = useState(null);
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [osType, setOsType] = useState('');
@@ -459,6 +468,7 @@ function App() {
     // import keys, location, geo...) so subscribed events stay linked to their feed.
     let normalizedEvent = normalizeEvent(existingEvent ? { ...existingEvent, ...newEvent } : newEvent, settingsRef.current);
     if (existingEvent?.source === 'ics-url') {
+      const { diffEventFields } = await loadIcsSync();
       const edited = diffEventFields(existingEvent, normalizedEvent);
       if (edited.length) {
         normalizedEvent = {
@@ -495,6 +505,7 @@ function App() {
     const normalizedImports = normalizeEvents(preparedEvents, settings);
     const currentEvents = eventsRef.current;
     if (sourceId) {
+      const { upsertIcsSourceEvents } = await loadIcsSync();
       const newEvents = upsertIcsSourceEvents({
         existingEvents: currentEvents,
         importedEvents: normalizedImports,
@@ -551,6 +562,7 @@ function App() {
         }));
       }
 
+      const { applyIcsFetchResult, fetchIcsSource } = await loadIcsSync();
       const fetched = await mapWithConcurrency(targets, ICS_SYNC_CONCURRENCY, source => fetchIcsSource({
         source,
         events: eventsRef.current,
@@ -826,6 +838,67 @@ function App() {
     }
   }, [notify]);
 
+  // What Dexter's tools can do in the app (see domain/dexterTools.js).
+  const dexterToolHost = useMemo(() => ({
+    createId: () => Date.now().toString(),
+    deleteEvent: async (eventId) => {
+      await handleDeleteEvent(eventId);
+      return eventsRef.current;
+    },
+    navigate: ({ view, date }) => {
+      setIsDexterOpen(false);
+      setCalendarNavigation({ view, date: date instanceof Date ? date.toISOString() : date });
+    },
+    openPanel: (panel, { tab, date } = {}) => {
+      if (panel === 'settings') {
+        setSettingsInitialTab(tab || 'general');
+        setIsSettingsOpen(true);
+      } else if (panel === 'reminders') {
+        setIsRemindersOpen(true);
+      } else if (panel === 'import') {
+        openImportWizard();
+      } else if (panel === 'subscriptions') {
+        openIcsSubscriptions();
+      } else if (panel === 'command_palette') {
+        setIsCommandPaletteOpen(true);
+      } else if (panel === 'new_event') {
+        setIsDexterOpen(false);
+        handleAddEvent(date || new Date());
+      }
+    },
+    patchSettings: (patch) => patchSettings(patch),
+    exportView: async (format) => {
+      // The export captures the calendar, which Dexter replaces on screen.
+      setIsDexterOpen(false);
+      await new Promise(resolve => setTimeout(resolve, 350));
+      if (format === 'pdf') await handleExportPdf();
+      else await handleExportPng();
+    },
+    syncSubscriptions: () => syncDueIcsSources({ force: true }),
+  }), [handleDeleteEvent, openImportWizard, openIcsSubscriptions, handleAddEvent, patchSettings, handleExportPdf, handleExportPng, syncDueIcsSources]);
+
+  const patchLocalAi = useCallback((patch) => patchSettings({
+    localAi: { ...(settingsRef.current.localAi || {}), ...patch },
+  }), [patchSettings]);
+
+  // The event editor is the most used modal: fetch it once the app is idle so
+  // its first opening stays instant without weighing on startup.
+  useEffect(() => {
+    if (!isLoaded) return undefined;
+    const idle = window.requestIdleCallback || ((callback) => setTimeout(callback, 2000));
+    const cancel = window.cancelIdleCallback || clearTimeout;
+    const handle = idle(() => { import("./components/EventModal"); });
+    return () => cancel(handle);
+  }, [isLoaded]);
+
+  // One cheap native call at startup tells whether Dexter's local model is installed.
+  useEffect(() => {
+    if (!isLoaded) return undefined;
+    const unsubscribe = subscribeLocalAiStatus(setLocalAiStatus);
+    refreshLocalAiStatus();
+    return unsubscribe;
+  }, [isLoaded]);
+
   useEffect(() => {
     if (!window.__TAURI_INTERNALS__) return undefined;
 
@@ -868,6 +941,14 @@ function App() {
     && events.length === 0
     && !settings.importPromptDismissed
     && !isImportWizardOpen;
+  const showLocalAiOffer = isLoaded
+    && !showImportPrompt
+    && settings.aiEnabled !== false
+    && !settings.localAi?.offerDismissed
+    && Boolean(localAiStatus?.supported)
+    && !localAiStatus?.installing
+    && !isModelReady(localAiStatus, settings.localAi)
+    && !isDexterOpen;
 
   const commandActions = useMemo(() => [
     {
@@ -1033,6 +1114,8 @@ function App() {
                 }}
                 onExportPng={handleExportPng}
                 onExportPdf={handleExportPdf}
+                toolHost={dexterToolHost}
+                onLocalAiChange={patchLocalAi}
               />
               </Suspense>
             ) : (
@@ -1047,6 +1130,7 @@ function App() {
                   onEditEvent={handleEditEvent}
                   onDeleteEvent={handleDeleteEvent}
                   onSettingsPatch={patchSettings}
+                  navigationRequest={calendarNavigation}
                 />
                 {showImportPrompt && (
                   <div className="absolute bottom-5 right-5 z-20 flex max-w-sm items-start gap-3 rounded-2xl border border-white/10 bg-[#1b1b1b]/95 p-4 shadow-2xl backdrop-blur-md">
@@ -1085,6 +1169,36 @@ function App() {
                     </button>
                   </div>
                 )}
+                {showLocalAiOffer && (
+                  <div className="absolute bottom-5 right-5 z-20 flex max-w-sm items-start gap-3 rounded-2xl border border-white/10 bg-[#1b1b1b]/95 p-4 shadow-2xl">
+                    <div className="rounded-xl bg-purple-500/15 p-2 text-purple-200">
+                      <HardDrive size={20} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-medium text-white">Installer Dexter hors ligne ?</div>
+                      <p className="mt-1 text-xs text-white/50">
+                        Un petit modèle d’IA (≈ 1 Go) tourne sur votre ordinateur avec llama.cpp : vos événements restent privés.
+                        Il n’occupe la mémoire que lorsque vous utilisez Dexter.
+                      </p>
+                      <div className="mt-3 flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setIsDexterOpen(true)}
+                          className="rounded-lg bg-purple-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-purple-500"
+                        >
+                          Choisir et installer
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => patchLocalAi({ offerDismissed: true })}
+                          className="rounded-lg px-3 py-1.5 text-xs text-white/45 hover:bg-white/5 hover:text-white"
+                        >
+                          Plus tard
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -1098,6 +1212,8 @@ function App() {
         </div>
       )}
 
+      {hasOpenedEventModal && (
+      <Suspense fallback={null}>
       <EventModal
         isOpen={isEventModalOpen}
         onClose={() => setIsEventModalOpen(false)}
@@ -1108,6 +1224,8 @@ function App() {
         settings={currentSettings}
         events={events}
       />
+      </Suspense>
+      )}
 
       {hasOpenedSettings && (
       <Suspense fallback={null}>
@@ -1126,6 +1244,7 @@ function App() {
         onAddAndSyncIcsSource={addAndSyncIcsSource}
         onToggleIcsSource={toggleIcsSource}
         onRemoveIcsSource={removeIcsSourceById}
+        onLocalAiChange={patchLocalAi}
         onClose={() => {
           setPreviewSettings(null);
           // Revert window effect if needed
@@ -1204,13 +1323,17 @@ function App() {
         </Suspense>
       )}
 
-      <RemindersModal
-        isOpen={isRemindersOpen}
-        onClose={() => setIsRemindersOpen(false)}
-        events={events}
-        onDeleteEvent={handleDeleteEvent}
-        settings={currentSettings}
-      />
+      {hasOpenedReminders && (
+        <Suspense fallback={null}>
+          <RemindersModal
+            isOpen={isRemindersOpen}
+            onClose={() => setIsRemindersOpen(false)}
+            events={events}
+            onDeleteEvent={handleDeleteEvent}
+            settings={currentSettings}
+          />
+        </Suspense>
+      )}
 
       <ContextMenu
         x={contextMenu.x}

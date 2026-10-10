@@ -1,3 +1,5 @@
+mod local_ai;
+
 use discord_rich_presence::{activity, DiscordIpc, DiscordIpcClient};
 use serde::Deserialize;
 use std::sync::Mutex;
@@ -203,6 +205,7 @@ fn write_portable_data_file(file_name: String, content: String) -> Result<(), St
 pub fn run() {
     tauri::Builder::default()
         .manage(DiscordRpcState::default())
+        .manage(local_ai::LocalAiState::default())
         .plugin(tauri_plugin_autostart::Builder::new().build())
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             let window = app.get_webview_window("main").expect("no main window");
@@ -222,6 +225,7 @@ pub fn run() {
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
+            local_ai::spawn_idle_watchdog(app.handle());
             let window = app.get_webview_window("main").unwrap();
 
             // Default effect
@@ -316,8 +320,22 @@ pub fn run() {
             write_portable_data_file,
             set_window_effect,
             discord_rpc_update,
-            discord_rpc_clear
+            discord_rpc_clear,
+            local_ai::local_ai_status,
+            local_ai::local_ai_install,
+            local_ai::local_ai_cancel_install,
+            local_ai::local_ai_remove_model,
+            local_ai::local_ai_uninstall,
+            local_ai::local_ai_ensure_server,
+            local_ai::local_ai_touch,
+            local_ai::local_ai_stop
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // Never leave the model loaded once Caltemp quits.
+            if let tauri::RunEvent::Exit = event {
+                app.state::<local_ai::LocalAiState>().shutdown();
+            }
+        });
 }

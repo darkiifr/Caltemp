@@ -9,6 +9,7 @@ export const DEFAULT_CATEGORY_LEGEND = {
 
 import { normalizeIcsSources } from './icsSources';
 import { normalizeAiUsageStats } from './aiUsage';
+import { DEFAULT_LOCAL_AI_SETTINGS, normalizeLocalAiSettings } from './localAiSettings';
 
 export const DEFAULT_SETTINGS = {
   theme: 'dark',
@@ -40,6 +41,7 @@ export const DEFAULT_SETTINGS = {
     ringtone: null,
   },
   aiUsageStats: normalizeAiUsageStats(),
+  localAi: DEFAULT_LOCAL_AI_SETTINGS,
 };
 
 const CATEGORY_KEYWORDS = [
@@ -80,6 +82,7 @@ export function normalizeSettings(settings = {}) {
     icsSources: normalizeIcsSources(safeSettings.icsSources || []),
     themes: safeSettings.themes || [],
     aiUsageStats: normalizeAiUsageStats(safeSettings.aiUsageStats),
+    localAi: normalizeLocalAiSettings(safeSettings.localAi),
     soundConfig: {
       ...DEFAULT_SETTINGS.soundConfig,
       ...(safeSettings.soundConfig || {}),
