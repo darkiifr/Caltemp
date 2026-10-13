@@ -34,7 +34,7 @@ export function activate(ctx) {
 Validez :
 
 ```bash
-npm run extensions:validate
+pnpm extensions:validate
 ```
 
 ## Thème

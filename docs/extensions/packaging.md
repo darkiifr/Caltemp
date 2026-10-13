@@ -32,7 +32,7 @@ Les exemples du repo utilisent le même format de dossier dans `examples/extensi
 ## Validation
 
 ```bash
-npm run extensions:validate
+pnpm extensions:validate
 ```
 
 La validation vérifie les exemples livrés avec Caltemp et les contrats du manifest.

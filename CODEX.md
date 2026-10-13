@@ -26,8 +26,8 @@ Codex must not:
 ## Desktop-first rules
 
 - Caltemp is a Tauri desktop app, not a website.
-- Use `npm run tauri dev` for runtime validation when a change touches Tauri plugins, filesystem persistence, notifications, updater, autostart, titlebar/window behavior, extensions install/update/remove, marketplace, or Discord RPC.
-- `npm run dev` is only a fast frontend check and can fail or differ when Tauri APIs are required.
+- Use `pnpm tauri dev` for runtime validation when a change touches Tauri plugins, filesystem persistence, notifications, updater, autostart, titlebar/window behavior, extensions install/update/remove, marketplace, or Discord RPC.
+- `pnpm dev` is only a fast frontend check and can fail or differ when Tauri APIs are required.
 - Internal app journeys must stay in the desktop application.
 - External links are allowed only for explicit user actions such as opening GitHub source, changelog, documentation, Ko-fi, or provider configuration.
 
@@ -36,10 +36,10 @@ Codex must not:
 Recommended verification sequence:
 
 ```bash
-npm run lint
-npm test
-npm run extensions:validate
-npm run build
+pnpm lint
+pnpm test
+pnpm extensions:validate
+pnpm build
 cd src-tauri
 cargo check
 ```
@@ -63,7 +63,7 @@ Use targeted commands during development, then run the full relevant set before 
 - Plugins must use the controlled SDK context; direct Tauri API access is not part of the v1 contract.
 - Permissions must be declared in manifests and enforced before sensitive SDK calls.
 - Themes are declarative and apply CSS variables.
-- Validate examples with `npm run extensions:validate`.
+- Validate examples with `pnpm extensions:validate`.
 
 ## Discord Rich Presence
 

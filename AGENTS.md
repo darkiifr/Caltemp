@@ -11,41 +11,43 @@ This file provides guidance to agents working with code in this repository.
 ## Setup and common commands
 Run from repository root unless noted.
 
+- Package manager is **pnpm** (version pinned by `packageManager` in `package.json`; run `corepack enable` once to get it). Do not use npm or commit a `package-lock.json`. Dependency overrides live in `pnpm.overrides`.
+
 - Install JS dependencies:
-  - `npm install`
+  - `pnpm install`
 
 - Frontend-only development (Vite on port 1420):
-  - `npm run dev`
+  - `pnpm dev`
 
 - Full Tauri desktop development (recommended for feature work touching plugins/window behavior):
-  - `npm run tauri dev`
+  - `pnpm tauri dev`
 
 - Frontend production build:
-  - `npm run build`
+  - `pnpm build`
 
 - Preview built frontend:
-  - `npm run preview`
+  - `pnpm preview`
 
 - Desktop production build (bundles installers via Tauri):
-  - `npm run tauri build`
+  - `pnpm tauri build`
 
 - Lint JS/JSX:
-  - `npm run lint`
+  - `pnpm lint`
 
 - Run JS unit tests:
-  - `npm test`
+  - `pnpm test`
 
 - Validate bundled extension examples:
-  - `npm run extensions:validate`
+  - `pnpm extensions:validate`
 
 - Rust-only check loop (from `src-tauri/`):
   - `cargo check`
 
 ## Tests
 - Unit tests use **Vitest**.
-- Run all tests with `npm test`.
-- Run a single test file with `npm test -- path/to/file.test.js`.
-- Extension manifest examples are validated with `npm run extensions:validate`.
+- Run all tests with `pnpm test`.
+- Run a single test file with `ppnpm test path/to/file.test.js`.
+- Extension manifest examples are validated with `pnpm extensions:validate`.
 
 ## Release/versioning workflow
 - Version updates are coordinated across:
@@ -148,14 +150,14 @@ Run from repository root unless noted.
   - single-instance behavior
   - plugin registration (fs/http/notification/os/shell/updater/autostart/process/etc.)
 - Tauri build/dev coupling is defined in `src-tauri/tauri.conf.json`:
-  - `beforeDevCommand: npm run dev`
-  - `beforeBuildCommand: npm run build`
+  - `beforeDevCommand: pnpm dev`
+  - `beforeBuildCommand: pnpm build`
   - `frontendDist: ../dist`
 
 ## Codebase-specific implementation notes
 - UI language/content is predominantly French; keep new user-facing text consistent.
 - Typography is **Vins Sans** (https://github.com/VinsStudio/VinsSans, OFL), bundled locally in `src/assets/fonts/vins-sans/` (WOFF2 + `OFL.txt`/`FONTLOG.txt`) and loaded from `src/main.jsx`. Use the `--caltemp-font-sans` / `--caltemp-font-mono` tokens (or Tailwind `font-sans` / `font-mono`) rather than hard-coding a family; never load fonts from a CDN. Vins Sans Pro has an `opsz` axis (`font-optical-sizing: auto`), so headings need no separate display font. To update, copy the new files from the font repo's `dist/`, then regenerate the Latin subset `VinsSansPro-Latin.woff2` with the commands in `FONTLOG.txt` (it is what the WebView loads for Latin text).
-- Several features depend on Tauri plugins and won’t behave correctly in browser-only Vite mode (notifications, fs persistence, autostart, updater, window effects, extensions install flow, Discord RPC, Dexter's local model). Prefer `npm run tauri dev` when touching these areas.
+- Several features depend on Tauri plugins and won’t behave correctly in browser-only Vite mode (notifications, fs persistence, autostart, updater, window effects, extensions install flow, Discord RPC, Dexter's local model). Prefer `pnpm tauri dev` when touching these areas.
 - Do not open external browsers for internal app views or normal app flows. Caltemp is a Tauri desktop app; internal journeys must stay inside the app. External links are only acceptable when explicitly user-triggered and justified, such as opening a GitHub source/changelog.
 - The custom titlebar must keep native desktop behavior: correct Tauri drag regions (`data-tauri-drag-region`), working minimize/maximize/close controls, and no browser-first assumptions.
 - Desktop/WebView rendering is authoritative. If Vite browser mode and Tauri WebView disagree, investigate WebView theme, transparency, color-scheme, Tauri window effects, and CSS variables before changing behavior.

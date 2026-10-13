@@ -14,21 +14,24 @@ Caltemp est une application de calendrier desktop moderne construite avec React,
 - Notes intégrées avec éditeur riche, pièces jointes et export Markdown.
 - Personnalisation du thème sombre, du fond Unsplash et des sons.
 - Écosystème d'extensions : SDK thèmes/plugins, marketplace GitHub et documentation développeur versionnée.
-- Base sécurité v6 : lockfile npm, audits automatisés, Dependabot npm/Cargo/GitHub Actions.
+- Base sécurité v6 : lockfile pnpm, audits automatisés, Dependabot npm/Cargo/GitHub Actions.
 
 ## Développement
 
+Caltemp utilise [pnpm](https://pnpm.io). `corepack enable` (fourni avec Node.js) installe la version fixée dans `package.json`.
+
 ```bash
-npm install
-npm run dev
-npm run build
-npm run lint
+corepack enable
+pnpm install
+pnpm dev
+pnpm build
+pnpm lint
 ```
 
 Pour tester le shell desktop :
 
 ```bash
-npm run tauri dev
+pnpm tauri dev
 ```
 
 Pour vérifier la partie Rust :
@@ -50,16 +53,16 @@ Caltemp inclut un SDK v1 pour créer des thèmes déclaratifs et des plugins Jav
 Valider les manifests d'exemple :
 
 ```bash
-npm run extensions:validate
+pnpm extensions:validate
 ```
 
 ## Sécurité
 
 La branche v6 ajoute :
 
-- `package-lock.json` pour des installations reproductibles.
-- `.github/dependabot.yml` pour surveiller les dépendances npm, Cargo et GitHub Actions.
-- `.github/workflows/security-audit.yml` pour lancer les audits npm/Rust, le lint et le build.
+- `pnpm-lock.yaml` pour des installations reproductibles (version de pnpm fixée par `packageManager` dans `package.json`).
+- `.github/dependabot.yml` pour surveiller les dépendances JavaScript (écosystème npm de Dependabot, compatible pnpm), Cargo et GitHub Actions.
+- `.github/workflows/security-audit.yml` pour lancer les audits pnpm/Rust, le lint et le build.
 
 ## Confidentialité
 

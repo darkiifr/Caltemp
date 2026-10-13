@@ -16,23 +16,27 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
 
+      # Version taken from the packageManager field of package.json.
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
           node-version: 22
-          cache: npm
+          cache: pnpm
 
       - name: Install dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
-      - name: Audit npm dependencies
-        run: npm audit --audit-level=moderate
+      - name: Audit dependencies
+        run: pnpm audit --audit-level moderate
 
       - name: Lint frontend
-        run: npm run lint
+        run: pnpm lint
 
       - name: Build frontend
-        run: npm run build
+        run: pnpm build
 
   rust:
     name: Rust audit and check
