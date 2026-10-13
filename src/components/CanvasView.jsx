@@ -41,9 +41,9 @@ export default function CanvasView({ content, onClose, onUpdate, title = "Canvas
             animate={{ x: 0, opacity: 1 }}
             exit={{ x: 450, opacity: 0 }}
             transition={{ duration: 0.2 }}
-            className="w-[450px] bg-[#111111] border-l border-[#333] flex flex-col h-full z-20 shadow-2xl relative overflow-hidden"
+            className="w-[450px] bg-[color:var(--caltemp-background,#111111)] border-l border-[#333] flex flex-col h-full z-20 shadow-2xl relative overflow-hidden"
         >
-            <div className="h-16 border-b border-[#333] px-6 flex items-center justify-between bg-[#111111]">
+            <div className="h-16 border-b border-[#333] px-6 flex items-center justify-between bg-[color:var(--caltemp-background,#111111)]">
                 <div className="flex items-center gap-3">
                     <div className="p-2 bg-white/5 rounded-md border border-white/5">
                         {isCode ? <FileCode className="w-4 h-4 text-blue-400" /> : <FileText className="w-4 h-4 text-emerald-400" />}
@@ -124,7 +124,7 @@ export default function CanvasView({ content, onClose, onUpdate, title = "Canvas
                 )}
             </div>
 
-            <div className="p-4 border-t border-[#333] bg-[#0a0a0a] flex justify-end">
+            <div className="p-4 border-t border-[#333] bg-[color:var(--caltemp-background,#0a0a0a)] flex justify-end">
                 <div className="text-[10px] text-gray-500 font-mono uppercase">
                     Dexter Canvas
                 </div>

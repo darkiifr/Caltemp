@@ -161,6 +161,7 @@ export function startGuest({ post, importModule }) {
       ui: Object.freeze({
         registerAction: registerCommand,
         toast: (message, type = 'info') => call('ui.toast', message, type),
+        prompt: (options) => call('ui.prompt', options),
         openGallery: (gallery) => call('ui.openGallery', gallery),
         showPanel,
       }),

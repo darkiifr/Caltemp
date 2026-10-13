@@ -210,7 +210,7 @@ function RemindersMap({ events, settings = {}, onEditEvent, onSettingsPatch }) {
                     onMapClick={() => setSelection(null)}
                 >
                     {selectedItems.length > 0 && (
-                        <div data-map-control="" className="absolute bottom-6 left-3 z-10 w-80 max-w-[calc(100%-1.5rem)] rounded-xl border border-white/10 bg-[#1e1e1e]/95 p-3 shadow-2xl backdrop-blur-md caltemp-event-in">
+                        <div data-map-control="" className="absolute bottom-6 left-3 z-10 w-80 max-w-[calc(100%-1.5rem)] rounded-xl border border-white/10 bg-[color:var(--caltemp-panel,#1e1e1e)]/95 p-3 shadow-2xl backdrop-blur-md caltemp-event-in">
                             <div className="mb-2 flex items-start justify-between gap-2">
                                 <div className="flex min-w-0 items-center gap-1.5 text-xs font-semibold text-white/60">
                                     <MapPin size={13} className="shrink-0" />

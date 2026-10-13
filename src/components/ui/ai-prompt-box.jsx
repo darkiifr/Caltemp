@@ -67,7 +67,7 @@ const TooltipContent = React.forwardRef(({ className, sideOffset = 4, ...props }
     ref={ref}
     sideOffset={sideOffset}
     className={cn(
-      "z-50 overflow-hidden rounded-md border border-[#333333] bg-[#1F2023] px-3 py-1.5 text-sm text-white shadow-md animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
+      "z-50 overflow-hidden rounded-md border border-[#333333] bg-[color:var(--caltemp-panel,#1F2023)] px-3 py-1.5 text-sm text-white shadow-md animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
       className
     )}
     {...props} />
@@ -94,13 +94,13 @@ const DialogContent = React.forwardRef(({ className, children, ...props }, ref) 
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        "fixed left-[50%] top-[50%] z-50 grid w-full max-w-[90vw] md:max-w-[800px] translate-x-[-50%] translate-y-[-50%] gap-4 border border-[#333333] bg-[#1F2023] p-0 shadow-xl duration-300 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 rounded-2xl",
+        "fixed left-[50%] top-[50%] z-50 grid w-full max-w-[90vw] md:max-w-[800px] translate-x-[-50%] translate-y-[-50%] gap-4 border border-[#333333] bg-[color:var(--caltemp-panel,#1F2023)] p-0 shadow-xl duration-300 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 rounded-2xl",
         className
       )}
       {...props}>
       {children}
       <DialogPrimitive.Close
-        className="absolute right-4 top-4 z-10 rounded-full bg-[#2E3033]/80 p-2 hover:bg-[#2E3033] transition-all">
+        className="absolute right-4 top-4 z-10 rounded-full bg-[color:var(--caltemp-panel-strong,#2E3033)]/80 p-2 hover:bg-[color:var(--caltemp-panel-strong,#2E3033)] transition-all">
         <X className="h-5 w-5 text-gray-200 hover:text-white" />
         <span className="sr-only">Close</span>
       </DialogPrimitive.Close>
@@ -211,7 +211,7 @@ const ImageViewDialog = React.memo(({ imageUrl, onClose }) => {
           animate={{ opacity: 1, scale: 1 }}
           exit={{ opacity: 0, scale: 0.95 }}
           transition={{ duration: 0.2, ease: "easeOut" }}
-          className="relative bg-[#1F2023] rounded-2xl overflow-hidden shadow-2xl">
+          className="relative bg-[color:var(--caltemp-panel,#1F2023)] rounded-2xl overflow-hidden shadow-2xl">
           <img
             src={imageUrl}
             alt="Full preview"
@@ -275,7 +275,7 @@ const PromptInput = React.forwardRef((
       <PromptInputContext.Provider value={contextValue}>
         <div
           className={cn(
-            "rounded-[28px] border border-white/10 bg-[#303030] shadow-[0_10px_40px_rgba(0,0,0,0.28)] transition-colors",
+            "rounded-[28px] border border-white/10 bg-[color:var(--caltemp-panel-strong,#303030)] shadow-[0_10px_40px_rgba(0,0,0,0.28)] transition-colors",
             (isLoading || (value ?? internalValue)?.length > 0) && "border-white/15"
           )}>
           <div

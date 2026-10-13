@@ -303,7 +303,7 @@ export default function CalendarImportWizard({
 
     return (
         <div className="fixed inset-0 z-[75] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="Importer depuis un autre agenda">
-            <div className="relative flex max-h-[88vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#181818] shadow-2xl">
+            <div className="relative flex max-h-[88vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-[color:var(--caltemp-panel,#181818)] shadow-2xl">
                 {isDragging && (
                     <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-2xl border-2 border-dashed border-blue-400/60 bg-blue-500/10 text-sm font-medium text-blue-100">
                         Déposez vos fichiers d’agenda ici
@@ -616,7 +616,7 @@ export default function CalendarImportWizard({
                     )}
                 </div>
 
-                <div className="flex items-center justify-end gap-3 border-t border-white/10 bg-[#202020] px-5 py-4">
+                <div className="flex items-center justify-end gap-3 border-t border-white/10 bg-[color:var(--caltemp-panel-strong,#202020)] px-5 py-4">
                     {step === 'done' ? (
                         <>
                             <button type="button" onClick={reset} className="rounded-xl px-4 py-2 text-sm font-medium text-white/50 hover:bg-white/5 hover:text-white">

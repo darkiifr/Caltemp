@@ -36,6 +36,7 @@ Alias SDK 1.x : `ctx.ui.registerAction`.
 ## `ctx.ui`
 
 - `toast(message, type?)` : notification interne discrète (`info`, `success`, `warning`, `error`). Sans permission.
+- `prompt({ title?, description?, placeholder?, defaultValue?, confirmLabel? })` → texte saisi, ou `null` si l’utilisateur annule. Sans permission.
 - `showPanel(panel)` → `{ id, update(panel), close() }`. Ouvre un panneau Caltemp. `update` échoue une fois le panneau fermé par l’utilisateur.
 - `openGallery({ title, description, items })` : galerie d’images HTTPS (`name`, `description`, `imageUrl`, `alt`, `sourceUrl`, `sourceLabel`).
 

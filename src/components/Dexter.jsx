@@ -182,7 +182,7 @@ const MessageItem = React.memo(({ msg, onResolveConfirmation }) => {
             <div className={`flex max-w-[92%] ${isUser ? 'flex-row-reverse lg:max-w-[72%]' : 'w-full lg:max-w-[82%]'}`}>
                 <div className={`relative min-w-0 px-4 py-3 text-[15px] leading-7 ${
                     isUser
-                        ? 'rounded-[22px] bg-[#2f2f2f] text-white shadow-[0_8px_28px_rgba(0,0,0,0.22)]'
+                        ? 'rounded-[22px] bg-[color:var(--caltemp-panel-strong,#2f2f2f)] text-white shadow-[0_8px_28px_rgba(0,0,0,0.22)]'
                         : 'text-white'
                 }`}>
                 <div className="prose prose-invert max-w-none prose-p:leading-7 prose-pre:p-0 prose-p:mb-3 prose-p:last:mb-0">
@@ -676,8 +676,8 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent, onO
     };
 
     return (
-        <div className="flex h-full w-full overflow-hidden bg-[#0a0a0a] relative">
-            <aside className="hidden w-72 shrink-0 border-r border-white/10 bg-[#111111] p-3 lg:flex lg:flex-col">
+        <div className="flex h-full w-full overflow-hidden bg-[color:var(--caltemp-background,#0a0a0a)] relative">
+            <aside className="hidden w-72 shrink-0 border-r border-white/10 bg-[color:var(--caltemp-background,#111111)] p-3 lg:flex lg:flex-col">
                 <button
                     type="button"
                     onClick={startNewConversation}
@@ -719,7 +719,7 @@ export default function Dexter({ onClose, settings, events = [], onAddEvent, onO
             {/* Split Screen Logic */}
             <div className="flex-1 flex flex-col min-w-0 relative z-10">
                 {/* Header */}
-                <div className="h-16 flex items-center justify-between px-6 shrink-0 border-b border-white/5 bg-[#0a0a0a]">
+                <div className="h-16 flex items-center justify-between px-6 shrink-0 border-b border-white/5 bg-[color:var(--caltemp-background,#0a0a0a)]">
                     <div className="flex items-center gap-3">
                         <div>
                             <h1 className="text-xl font-semibold tracking-tight text-white">Dexter</h1>

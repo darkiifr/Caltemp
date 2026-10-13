@@ -42,7 +42,7 @@ export default function NotificationToast({ notification, onClose, onSnooze }) {
 
   return (
     <div className="fixed top-20 right-4 z-50 animate-in slide-in-from-right fade-in duration-300">
-      <div className="bg-[#1e1e1e]/90 backdrop-blur-md border border-white/10 rounded-xl p-4 shadow-2xl flex items-start gap-3 w-96">
+      <div className="bg-[color:var(--caltemp-panel,#1e1e1e)]/90 backdrop-blur-md border border-white/10 rounded-xl p-4 shadow-2xl flex items-start gap-3 w-96">
         <div className="mt-1 shrink-0">
           {getIcon()}
         </div>

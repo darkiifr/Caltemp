@@ -1,42 +1,39 @@
 import { prepareExtension } from './extensionStore.js';
 
-import youtubeThemeManifestText from '../../examples/extensions/youtube-theme/manifest.json?raw';
-import minimalThemeManifestText from '../../examples/extensions/minimal-theme/manifest.json?raw';
-import helloEntryCode from '../../examples/extensions/hello/index.js?raw';
-import weekSummaryEntryCode from '../../examples/extensions/week-summary/index.js?raw';
-import frenchFootballManifestText from '../../examples/extensions/french-football-gallery/manifest.json?raw';
-import frenchFootballEntryCode from '../../examples/extensions/french-football-gallery/index.js?raw';
+// Every folder in examples/extensions is bundled: `manifest.json` (themes,
+// folder-shaped plugins) and/or `index.js` (single-file plugins carry their
+// manifest in a `@caltemp` header).
+const manifests = import.meta.glob('../../examples/extensions/*/manifest.json', {
+  query: '?raw',
+  import: 'default',
+  eager: true,
+});
+const entries = import.meta.glob('../../examples/extensions/*/index.js', {
+  query: '?raw',
+  import: 'default',
+  eager: true,
+});
 
-// Single-file plugins only provide `entryCode`: their manifest is the
-// `@caltemp` header.
-const bundledExamples = [
-  {
-    folderPath: 'examples/extensions/week-summary',
-    entryCode: weekSummaryEntryCode,
-  },
-  {
-    folderPath: 'examples/extensions/hello',
-    entryCode: helloEntryCode,
-  },
-  {
-    folderPath: 'examples/extensions/youtube-theme',
-    manifestText: youtubeThemeManifestText,
-  },
-  {
-    folderPath: 'examples/extensions/minimal-theme',
-    manifestText: minimalThemeManifestText,
-  },
-  {
-    folderPath: 'examples/extensions/french-football-gallery',
-    manifestText: frenchFootballManifestText,
-    entryCode: frenchFootballEntryCode,
-  },
-];
+function folderOf(path) {
+  return path.replace(/^(?:\.\.\/)+/, '').replace(/\/[^/]+$/, '');
+}
+
+const folders = [...new Set([...Object.keys(manifests), ...Object.keys(entries)].map(folderOf))];
+
+const bundledExamples = folders.map((folderPath) => {
+  const manifestText = manifests[`../../${folderPath}/manifest.json`];
+  const entryCode = entries[`../../${folderPath}/index.js`];
+  const { manifest } = prepareExtension({ manifestText, code: entryCode });
+  return { folderPath, manifestText, entryCode, manifest };
+});
+
+// Plugins first, then themes, each sorted by name.
+bundledExamples.sort((a, b) => (
+  a.manifest.type === b.manifest.type
+    ? a.manifest.name.localeCompare(b.manifest.name, 'fr')
+    : a.manifest.type === 'plugin' ? -1 : 1
+));
 
 export function getBundledExtensionExamples() {
-  return bundledExamples.map((example) => ({
-    source: 'bundled-example',
-    ...example,
-    manifest: prepareExtension({ manifestText: example.manifestText, code: example.entryCode }).manifest,
-  }));
+  return bundledExamples.map((example) => ({ source: 'bundled-example', ...example }));
 }

@@ -119,7 +119,8 @@ Run from repository root unless noted.
 - `ExtensionManager` applies install/update/enable/disable/remove/reload/config changes live (no restart) and disposes a plugin's commands, panels and subscriptions itself. `App.jsx` creates one manager for the app lifetime; its `extensionHost` only reads refs.
 - Plugins must not call Tauri APIs directly. New capabilities go through `hostApi.js` with a declared permission when they touch user data or the network; calendar and settings event payloads are reduced for plugins lacking `calendar:read` / `settings:read`.
 - Per-plugin storage (`extensionStorage.js`) persists to `extensions/<id>/storage.json`; user settings declared in the manifest are stored in the index entry's `config`.
-- Themes are declarative manifests applying CSS variables (`theme.colors` shorthand or `theme.variables`).
+- Themes are declarative manifests applying CSS variables (`theme.colors` shorthand or `theme.variables`). Theme tokens: `--caltemp-accent`, `-text`, `-background`, `-panel`, `-panel-strong`. Dark surfaces in components use `bg-[color:var(--caltemp-panel,#1e1e1e)]`-style classes (keep the old colour as fallback when adding new ones); `App.css` remaps Tailwind's `blue-*` palette and `--color-white` only for the tokens listed in `data-caltemp-theme-tokens` on `<html>`.
+- Bundled examples: every folder in `examples/extensions/` is picked up by `localExamples.js` (`import.meta.glob`) and exercised by `src/extensions/examples.test.js`.
 - Marketplace UI is `src/components/MarketplacePanel.jsx` (file install/drag-and-drop with permission preview, per-plugin settings); plugin panels render in `src/components/ExtensionPanelModal.jsx`.
 - Official registry contract is `extensions/registry.json`.
 - Developer docs are under `docs/extensions/`.

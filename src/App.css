@@ -215,6 +215,32 @@ body {
   --caltemp-ease-spring: cubic-bezier(0.34, 1.36, 0.64, 1);
 }
 
+/*
+ * Extension themes (docs/extensions/guides/themes.md).
+ * Surfaces read --caltemp-background / --caltemp-panel / --caltemp-panel-strong
+ * directly, with the default colour as fallback. The accent and text tokens
+ * remap Tailwind's palette, but only for the tokens the active theme declares
+ * (ExtensionManager sets data-caltemp-theme-tokens), so the default look and
+ * the accent derived from the background image are untouched otherwise.
+ * blue-600 (filled buttons with white text) is darkened enough to stay
+ * readable with light accents.
+ */
+:root[data-caltemp-theme-tokens~="accent"] {
+  --color-blue-200: color-mix(in oklab, var(--caltemp-accent) 40%, white);
+  --color-blue-300: color-mix(in oklab, var(--caltemp-accent) 60%, white);
+  --color-blue-400: color-mix(in oklab, var(--caltemp-accent) 80%, white);
+  --color-blue-500: var(--caltemp-accent);
+  --color-blue-600: color-mix(in oklab, var(--caltemp-accent) 75%, black);
+  --color-blue-700: color-mix(in oklab, var(--caltemp-accent) 60%, black);
+  --color-blue-800: color-mix(in oklab, var(--caltemp-accent) 45%, black);
+  --color-blue-900: color-mix(in oklab, var(--caltemp-accent) 30%, black);
+}
+
+:root[data-caltemp-theme-tokens~="text"] {
+  --color-white: var(--caltemp-text);
+  --foreground: var(--caltemp-text);
+}
+
 @keyframes slideMonthRight {
   from { opacity: 0; transform: translateX(14px); }
   to { opacity: 1; transform: translateX(0); }

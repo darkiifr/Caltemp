@@ -51,7 +51,7 @@ export default function CustomTimePicker({ value, onChange }) {
 
             {/* Dropdown Time Picker */}
             {isOpen && (
-                <div className="absolute top-full left-0 mt-2 w-48 bg-[#1e1e1e] border border-white/10 rounded-2xl shadow-2xl p-2 z-50 animate-in zoom-in-95 duration-200 flex h-64 overflow-hidden">
+                <div className="absolute top-full left-0 mt-2 w-48 bg-[color:var(--caltemp-panel,#1e1e1e)] border border-white/10 rounded-2xl shadow-2xl p-2 z-50 animate-in zoom-in-95 duration-200 flex h-64 overflow-hidden">
 
                     {/* Hours Column */}
                     <div className="flex-1 flex flex-col border-r border-white/5">

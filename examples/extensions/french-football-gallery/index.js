@@ -268,15 +268,13 @@ const players = [
 ];
 
 export function activate(ctx) {
-  return ctx.ui.registerAction({
-    id: 'french-football-gallery',
+  ctx.commands.register({
+    id: 'open',
     label: 'Afficher les footballeurs français',
-    run: () => {
-      ctx.ui.openGallery({
-        title: 'Galerie Bleus',
-        description: 'Photos de footballeurs et footballeuses français connus.',
-        items: players,
-      });
-    },
+    run: () => ctx.ui.openGallery({
+      title: 'Galerie Bleus',
+      description: 'Photos de footballeurs et footballeuses français connus.',
+      items: players,
+    }),
   });
 }

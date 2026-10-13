@@ -45,7 +45,7 @@ export default function Titlebar({ style = 'macos', osType, notificationBadge = 
             <div
                 data-tauri-drag-region
                 onDoubleClick={handleTitlebarDoubleClick}
-                className="h-10 w-full bg-[#1e1e1e]/90 backdrop-blur-md border-b border-white/5 flex items-center select-none transition-colors duration-300 px-4 justify-between relative z-50 cursor-default"
+                className="h-10 w-full bg-[color:var(--caltemp-panel,#1e1e1e)]/90 backdrop-blur-md border-b border-white/5 flex items-center select-none transition-colors duration-300 px-4 justify-between relative z-50 cursor-default"
             >
                 <div className="flex gap-2.5 relative z-50" onMouseDown={(e) => e.stopPropagation()}>
                     <button
@@ -89,7 +89,7 @@ export default function Titlebar({ style = 'macos', osType, notificationBadge = 
             <div
                 data-tauri-drag-region
                 onDoubleClick={handleTitlebarDoubleClick}
-                className="h-8 w-full bg-[#1e1e1e]/80 backdrop-blur-md border-b border-white/10 flex items-center select-none transition-colors duration-300 relative z-50 cursor-default"
+                className="h-8 w-full bg-[color:var(--caltemp-panel,#1e1e1e)]/80 backdrop-blur-md border-b border-white/10 flex items-center select-none transition-colors duration-300 relative z-50 cursor-default"
             >
                 <div className="flex-1 px-4 pointer-events-none">
                     <div className="text-sm font-medium text-gray-300">{getTitle()}</div>

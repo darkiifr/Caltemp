@@ -89,7 +89,7 @@ export default function Sidebar({ notes, onSelectNote, selectedNoteId, onCreateN
                         placeholder="Search"
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
-                        className="w-full bg-[#2C2C2E] border border-transparent focus:border-blue-500/50 pl-9 pr-3 py-2 rounded-md text-sm outline-none shadow-sm transition-all duration-200 font-medium placeholder-gray-500 text-gray-100"
+                        className="w-full bg-[color:var(--caltemp-panel-strong,#2C2C2E)] border border-transparent focus:border-blue-500/50 pl-9 pr-3 py-2 rounded-md text-sm outline-none shadow-sm transition-all duration-200 font-medium placeholder-gray-500 text-gray-100"
                     />
                 </div>
             </div>
@@ -132,7 +132,7 @@ export default function Sidebar({ notes, onSelectNote, selectedNoteId, onCreateN
             {/* Context Menu */}
             {contextMenu.visible && (
                 <div
-                    className="fixed z-50 w-48 bg-[#2c2c2c] border border-white/10 rounded-lg shadow-xl py-1 animate-in fade-in zoom-in-95 duration-100"
+                    className="fixed z-50 w-48 bg-[color:var(--caltemp-panel-strong,#2c2c2c)] border border-white/10 rounded-lg shadow-xl py-1 animate-in fade-in zoom-in-95 duration-100"
                     style={{ top: contextMenu.y, left: contextMenu.x }}
                 >
                     <button

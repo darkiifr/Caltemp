@@ -79,9 +79,4 @@ export function activate(ctx) {
 
 ## Exemples livrés
 
-Installables depuis **Paramètres › Extensions › Exemples inclus** :
-
-- `examples/extensions/hello` : le plus petit plugin possible.
-- `examples/extensions/week-summary` : commande, panneau, réglages, stockage et événements.
-- `examples/extensions/french-football-gallery` : plugin au format dossier (`manifest.json` + `index.js`) qui ouvre une galerie.
-- `examples/extensions/minimal-theme` et `examples/extensions/youtube-theme` : thèmes.
+Tous les dossiers de `examples/extensions/` sont installables depuis **Paramètres › Extensions › Exemples inclus**. Voir [la liste commentée](../../examples/extensions/README.md).

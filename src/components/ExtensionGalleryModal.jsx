@@ -217,7 +217,7 @@ export default function ExtensionGalleryModal({ gallery, onClose }) {
 
   return (
     <div className="fixed inset-0 z-[90] bg-black/70 backdrop-blur-md flex items-center justify-center p-5">
-      <div className="w-full max-w-5xl max-h-[86vh] overflow-hidden rounded-2xl border border-white/10 bg-[#101010]/95 shadow-2xl">
+      <div className="w-full max-w-5xl max-h-[86vh] overflow-hidden rounded-2xl border border-white/10 bg-[color:var(--caltemp-panel,#101010)]/95 shadow-2xl">
         <div className="flex items-start justify-between gap-4 px-5 py-4 border-b border-white/10">
           <div className="min-w-0">
             <h2 className="text-lg font-semibold text-white truncate">{title}</h2>

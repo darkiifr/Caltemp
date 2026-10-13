@@ -239,7 +239,7 @@ export default function Editor({ note, onUpdateNote, settings }) {
 
     if (!note) {
         return (
-            <div className="flex-1 h-full flex items-center justify-center text-gray-400 bg-[#1e1e1e]/90 backdrop-blur-sm transition-all duration-300">
+            <div className="flex-1 h-full flex items-center justify-center text-gray-400 bg-[color:var(--caltemp-panel,#1e1e1e)]/90 backdrop-blur-sm transition-all duration-300">
                 <p className="animate-pulse font-medium">Sélectionnez ou créez une note</p>
                 <div className="absolute top-0 left-0 right-0 h-8 z-10" data-tauri-drag-region />
             </div>
@@ -683,7 +683,7 @@ export default function Editor({ note, onUpdateNote, settings }) {
 
                     {/* Shimmer Loading Overlay */}
                     {isWaiting && (
-                        <div className="absolute inset-0 z-20 bg-[#1e1e1e]/40 backdrop-blur-[1px] flex flex-col gap-4 pt-2 animate-in fade-in duration-300 pointer-events-none">
+                        <div className="absolute inset-0 z-20 bg-[color:var(--caltemp-panel,#1e1e1e)]/40 backdrop-blur-[1px] flex flex-col gap-4 pt-2 animate-in fade-in duration-300 pointer-events-none">
                             <div className="h-4 w-3/4 bg-white/5 rounded animate-shimmer"></div>
                             <div className="h-4 w-full bg-white/5 rounded animate-shimmer"></div>
                             <div className="h-4 w-5/6 bg-white/5 rounded animate-shimmer"></div>
@@ -694,7 +694,7 @@ export default function Editor({ note, onUpdateNote, settings }) {
 
                     {/* AI Review Overlay */}
                     {pendingAiContent && (
-                        <div className="absolute inset-0 z-30 bg-[#1e1e1e] flex flex-col animate-in fade-in slide-in-from-bottom-4 rounded-lg border border-blue-500/30 shadow-2xl overflow-hidden">
+                        <div className="absolute inset-0 z-30 bg-[color:var(--caltemp-panel,#1e1e1e)] flex flex-col animate-in fade-in slide-in-from-bottom-4 rounded-lg border border-blue-500/30 shadow-2xl overflow-hidden">
                             <div className="flex items-center justify-between px-4 py-3 bg-blue-900/20 border-b border-blue-500/20 shrink-0">
                                 <div className="flex items-center gap-2">
                                     <Sparkles className="w-4 h-4 text-blue-400" />
@@ -820,7 +820,7 @@ export default function Editor({ note, onUpdateNote, settings }) {
             </div>
 
             {/* Bottom Toolbar */}
-            <div className="h-12 border-t border-white/5 bg-[#1e1e1e]/80 backdrop-blur-md px-6 flex items-center gap-4 relative z-20">
+            <div className="h-12 border-t border-white/5 bg-[color:var(--caltemp-panel,#1e1e1e)]/80 backdrop-blur-md px-6 flex items-center gap-4 relative z-20">
                 {/* STT Interim Preview */}
                 {isListening && (
                     <div className="absolute bottom-16 left-1/2 -translate-x-1/2 pointer-events-none w-full max-w-2xl px-4 flex justify-center">

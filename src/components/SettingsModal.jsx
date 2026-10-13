@@ -750,10 +750,10 @@ export default function SettingsModal({
     return (
         <>
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200 p-4">
-                <div className="bg-[#1e1e1e] w-full max-w-[800px] h-full max-h-[600px] rounded-2xl shadow-2xl border border-white/10 flex overflow-hidden animate-control-panel">
+                <div className="bg-[color:var(--caltemp-panel,#1e1e1e)] w-full max-w-[800px] h-full max-h-[600px] rounded-2xl shadow-2xl border border-white/10 flex overflow-hidden animate-control-panel">
 
                     {/* Sidebar */}
-                    <div className="w-64 bg-[#252525] border-r border-white/5 p-4 flex flex-col gap-2">
+                    <div className="w-64 bg-[color:var(--caltemp-panel-strong,#252525)] border-r border-white/5 p-4 flex flex-col gap-2">
                         <h2 className="text-xl font-bold text-white px-4 mb-6 mt-2">Paramètres</h2>
                         {tabs.map(tab => (
                             <button
@@ -904,7 +904,7 @@ export default function SettingsModal({
                                             </div>
                                         </div>
 
-                                        <div className="mt-4 overflow-hidden rounded-lg border border-white/10 bg-[#121212]">
+                                        <div className="mt-4 overflow-hidden rounded-lg border border-white/10 bg-[color:var(--caltemp-background,#121212)]">
                                             <div className="flex h-9 items-center justify-between border-b border-white/10 bg-white/[0.04] px-3">
                                                 {localSettings.titlebarStyle === 'macos' ? (
                                                     <div className="flex gap-1.5">
@@ -930,12 +930,12 @@ export default function SettingsModal({
                                                 <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(56,189,248,0.35),transparent_28%),radial-gradient(circle_at_82%_28%,rgba(168,85,247,0.25),transparent_24%),linear-gradient(135deg,#202020,#0b0b0b)]" />
                                                 <div className={`relative grid gap-3 rounded-lg border border-white/10 p-4 md:grid-cols-[1fr_120px] ${
                                                     activeEffectValue === 'none'
-                                                        ? 'bg-[#171717]'
+                                                        ? 'bg-[color:var(--caltemp-panel,#171717)]'
                                                         : activeEffectValue === 'blur'
-                                                            ? 'bg-[#171717]/70 backdrop-blur-md'
+                                                            ? 'bg-[color:var(--caltemp-panel,#171717)]/70 backdrop-blur-md'
                                                             : activeEffectValue === 'acrylic'
-                                                                ? 'bg-[#171717]/65 backdrop-blur-xl shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]'
-                                                                : 'bg-[#171717]/82 backdrop-saturate-150'
+                                                                ? 'bg-[color:var(--caltemp-panel,#171717)]/65 backdrop-blur-xl shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]'
+                                                                : 'bg-[color:var(--caltemp-panel,#171717)]/82 backdrop-saturate-150'
                                                 }`}>
                                                     <div>
                                                         <div className="text-sm font-semibold text-white">Mardi 16 juin</div>
@@ -1189,7 +1189,7 @@ export default function SettingsModal({
                             {/* --- AI --- */}
                             {activeTab === 'ai' && (
                                 <div className="space-y-6">
-                                    <div className="rounded-xl border border-white/10 bg-[#202020] p-6">
+                                    <div className="rounded-xl border border-white/10 bg-[color:var(--caltemp-panel-strong,#202020)] p-6">
                                         <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
                                             <div className="flex min-w-0 gap-4">
                                                 <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-lg ${localSettings.aiEnabled !== false ? 'bg-blue-500/15 text-blue-100' : 'bg-white/5 text-gray-400'}`}>
@@ -1238,7 +1238,7 @@ export default function SettingsModal({
                                             <label className="block">
                                                 <span className="text-sm font-medium text-white">Libérer la mémoire après</span>
                                                 <select
-                                                    className="mt-2 h-10 w-full rounded-lg border border-white/10 bg-[#181818] px-3 text-sm text-white"
+                                                    className="mt-2 h-10 w-full rounded-lg border border-white/10 bg-[color:var(--caltemp-panel,#181818)] px-3 text-sm text-white"
                                                     value={normalizeLocalAiSettings(localSettings.localAi).idleTimeoutMinutes}
                                                     onChange={(event) => handleChange('localAi', { ...normalizeLocalAiSettings(localSettings.localAi), idleTimeoutMinutes: Number(event.target.value) })}
                                                 >
@@ -1250,7 +1250,7 @@ export default function SettingsModal({
                                             <label className="block">
                                                 <span className="text-sm font-medium text-white">Cœurs processeur</span>
                                                 <select
-                                                    className="mt-2 h-10 w-full rounded-lg border border-white/10 bg-[#181818] px-3 text-sm text-white"
+                                                    className="mt-2 h-10 w-full rounded-lg border border-white/10 bg-[color:var(--caltemp-panel,#181818)] px-3 text-sm text-white"
                                                     value={normalizeLocalAiSettings(localSettings.localAi).threads}
                                                     onChange={(event) => handleChange('localAi', { ...normalizeLocalAiSettings(localSettings.localAi), threads: Number(event.target.value) })}
                                                 >
@@ -1263,7 +1263,7 @@ export default function SettingsModal({
                                             <label className="block">
                                                 <span className="text-sm font-medium text-white">Mémoire de conversation</span>
                                                 <select
-                                                    className="mt-2 h-10 w-full rounded-lg border border-white/10 bg-[#181818] px-3 text-sm text-white"
+                                                    className="mt-2 h-10 w-full rounded-lg border border-white/10 bg-[color:var(--caltemp-panel,#181818)] px-3 text-sm text-white"
                                                     value={normalizeLocalAiSettings(localSettings.localAi).ctxSize}
                                                     onChange={(event) => handleChange('localAi', { ...normalizeLocalAiSettings(localSettings.localAi), ctxSize: Number(event.target.value) })}
                                                 >
@@ -1316,7 +1316,7 @@ export default function SettingsModal({
                                                 ['Entrée', formatUsageNumber(aiUsageStats.promptTokens), 'tokens prompt'],
                                                 ['Sortie', formatUsageNumber(aiUsageStats.completionTokens), 'tokens réponse'],
                                             ].map(([label, value, helper]) => (
-                                                <div key={label} className="rounded-lg border border-white/10 bg-[#181818] px-4 py-3">
+                                                <div key={label} className="rounded-lg border border-white/10 bg-[color:var(--caltemp-panel,#181818)] px-4 py-3">
                                                     <div className="text-xs font-medium uppercase tracking-wider text-gray-500">{label}</div>
                                                     <div className="mt-2 text-2xl font-semibold text-white">{value}</div>
                                                     <div className="mt-1 text-xs text-gray-500">{helper}</div>
@@ -1325,7 +1325,7 @@ export default function SettingsModal({
                                         </div>
 
                                         <div className="mt-5 grid gap-4 xl:grid-cols-[minmax(0,1fr)_240px]">
-                                            <div className="rounded-lg border border-white/10 bg-[#181818] p-4">
+                                            <div className="rounded-lg border border-white/10 bg-[color:var(--caltemp-panel,#181818)] p-4">
                                                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                                                     <div className="min-w-0">
                                                         <div className="text-sm font-medium text-white">Modèle le plus utilisé</div>
@@ -1348,7 +1348,7 @@ export default function SettingsModal({
                                                 </div>
                                             </div>
 
-                                            <div className="rounded-lg border border-white/10 bg-[#181818] p-4">
+                                            <div className="rounded-lg border border-white/10 bg-[color:var(--caltemp-panel,#181818)] p-4">
                                                 <div className="text-sm font-medium text-white">Exécution</div>
                                                 <div className="mt-2 font-mono text-sm text-gray-200">llama.cpp · 127.0.0.1</div>
                                                 <div className="mt-4 text-xs leading-5 text-gray-500">
@@ -1377,7 +1377,7 @@ export default function SettingsModal({
                             {activeTab === 'background' && (
                                 <div className="space-y-5">
                                     <div className="overflow-hidden rounded-lg border border-white/10 bg-white/[0.04]">
-                                        <div className="relative aspect-[16/7] bg-[#111]">
+                                        <div className="relative aspect-[16/7] bg-[color:var(--caltemp-background,#111)]">
                                             {backgroundPreviewUrl ? (
                                                 <img
                                                     src={backgroundPreviewUrl}
@@ -1820,7 +1820,7 @@ export default function SettingsModal({
                                             {aboutRows.map((row) => {
                                                 const RowIcon = row.icon;
                                                 return (
-                                                    <div key={row.label} className="flex items-center gap-3 bg-[#1e1e1e] p-4">
+                                                    <div key={row.label} className="flex items-center gap-3 bg-[color:var(--caltemp-panel,#1e1e1e)] p-4">
                                                         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/5 text-gray-300">
                                                             <RowIcon size={17} />
                                                         </div>
@@ -1927,7 +1927,7 @@ export default function SettingsModal({
                         </div>
 
                         {/* Footer */}
-                        <div className="p-4 border-t border-white/5 bg-[#252525] flex justify-end gap-3">
+                        <div className="p-4 border-t border-white/5 bg-[color:var(--caltemp-panel-strong,#252525)] flex justify-end gap-3">
                             <button
                                 onClick={onClose}
                                 className="px-4 py-2 rounded-xl text-sm font-medium text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
@@ -1956,7 +1956,7 @@ export default function SettingsModal({
 
             {icsImportDraft && (
                 <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
-                    <div className="max-h-[86vh] w-full max-w-4xl overflow-hidden rounded-2xl border border-white/10 bg-[#181818] shadow-2xl">
+                    <div className="max-h-[86vh] w-full max-w-4xl overflow-hidden rounded-2xl border border-white/10 bg-[color:var(--caltemp-panel,#181818)] shadow-2xl">
                         <div className="flex items-start justify-between gap-4 border-b border-white/10 px-5 py-4">
                             <div className="min-w-0">
                                 <h3 className="text-lg font-semibold text-white">Préparer l’import ICS</h3>
@@ -2039,7 +2039,7 @@ export default function SettingsModal({
                             </div>
                         </div>
 
-                        <div className="flex justify-end gap-3 border-t border-white/10 bg-[#202020] px-5 py-4">
+                        <div className="flex justify-end gap-3 border-t border-white/10 bg-[color:var(--caltemp-panel-strong,#202020)] px-5 py-4">
                             <button
                                 type="button"
                                 onClick={() => setIcsImportDraft(null)}

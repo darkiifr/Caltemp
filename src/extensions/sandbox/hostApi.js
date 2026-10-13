@@ -248,6 +248,20 @@ export function createPluginApi({ manifest, host = {}, storage, config, emitCust
       return toast(manifest.name, text(message, 1000), NOTIFY_TYPES.has(type) ? type : 'info');
     },
 
+    // Asks the user for one line of text; resolves to null when cancelled.
+    'ui.prompt': async (options = {}) => {
+      const value = await requireHost('prompt')({
+        extensionId: manifest.id,
+        extensionName: manifest.name,
+        title: text(options?.title, 200) || manifest.name,
+        description: text(options?.description, 500),
+        placeholder: text(options?.placeholder, 200),
+        defaultValue: text(options?.defaultValue, 1000),
+        confirmLabel: text(options?.confirmLabel, 40) || 'Valider',
+      });
+      return typeof value === 'string' ? value.slice(0, 1000) : null;
+    },
+
     'commands.register': (command) => {
       if (!command || typeof command.id !== 'string' || !command.id.trim()
         || typeof command.label !== 'string' || typeof command.run !== 'function') {

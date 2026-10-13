@@ -6,9 +6,18 @@ import { createPluginApi, pickReadableSettings } from './sandbox/hostApi.js';
 import { PluginConnection } from './sandbox/pluginConnection.js';
 import { createInProcessTransport, createWorkerTransport } from './sandbox/transports.js';
 
-function getDefaultRootStyle() {
+function getDefaultRoot() {
   if (typeof document === 'undefined') return null;
-  return document.documentElement?.style || null;
+  return document.documentElement || null;
+}
+
+// `--caltemp-accent` -> `accent`: listed on the root element so CSS can
+// remap palettes only for the tokens the active theme declares.
+function themeTokens(variables) {
+  return Object.keys(variables)
+    .filter((name) => name.startsWith('--caltemp-'))
+    .map((name) => name.slice('--caltemp-'.length))
+    .join(' ');
 }
 
 function createDefaultTransport() {
@@ -38,7 +47,10 @@ export class ExtensionManager {
   constructor({
     store,
     host = {},
-    rootStyle = getDefaultRootStyle(),
+    // Element whose style and data attributes receive the active theme.
+    // Passing `rootStyle` alone (tests) leaves attributes untouched.
+    rootElement = undefined,
+    rootStyle = undefined,
     // Tests (and tooling) can provide the plugin module directly; it then runs
     // in-process through the same protocol.
     loadPluginModule = null,
@@ -49,7 +61,9 @@ export class ExtensionManager {
   } = {}) {
     this.store = store;
     this.host = host;
-    this.rootStyle = rootStyle;
+    const defaultRoot = rootElement === undefined && rootStyle === undefined ? getDefaultRoot() : null;
+    this.rootElement = rootElement ?? defaultRoot;
+    this.rootStyle = rootStyle ?? this.rootElement?.style ?? null;
     this.logger = logger;
     this.onChange = onChange;
     this.createTransport = createTransport || (loadPluginModule
@@ -253,11 +267,18 @@ export class ExtensionManager {
       variables.add(name);
     }
     this.appliedThemeVariables.set(manifest.id, variables);
+    if (this.rootElement?.dataset) {
+      this.rootElement.dataset.caltempTheme = manifest.id;
+      this.rootElement.dataset.caltempThemeTokens = themeTokens(manifest.theme.variables);
+    }
     this.emit('theme:changed', { id: manifest.id, variables: manifest.theme.variables });
   }
 
   clearTheme(extensionId = null) {
     if (!this.rootStyle) return;
+    const removing = extensionId
+      ? this.appliedThemeVariables.has(extensionId)
+      : this.appliedThemeVariables.size > 0;
     const entries = extensionId
       ? [[extensionId, this.appliedThemeVariables.get(extensionId) || new Set()]]
       : Array.from(this.appliedThemeVariables.entries());
@@ -270,6 +291,12 @@ export class ExtensionManager {
 
     if (extensionId) this.appliedThemeVariables.delete(extensionId);
     else this.appliedThemeVariables.clear();
+
+    if (removing && this.appliedThemeVariables.size === 0 && this.rootElement?.dataset) {
+      delete this.rootElement.dataset.caltempTheme;
+      delete this.rootElement.dataset.caltempThemeTokens;
+      this.eventBus.emit('theme:changed', { id: null, variables: {} });
+    }
   }
 
   dispatch(eventName, payload) {

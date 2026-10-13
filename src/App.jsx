@@ -37,6 +37,7 @@ const SettingsModal = lazy(() => import("./components/SettingsModal"));
 const Dexter = lazy(() => import("./components/Dexter"));
 const ExtensionGalleryModal = lazy(() => import("./components/ExtensionGalleryModal"));
 const ExtensionPanelModal = lazy(() => import("./components/ExtensionPanelModal"));
+const ExtensionPromptModal = lazy(() => import("./components/ExtensionPromptModal"));
 const CalendarImportWizard = lazy(() => import("./components/CalendarImportWizard"));
 const EventModal = lazy(() => import("./components/EventModal"));
 const RemindersModal = lazy(() => import("./components/RemindersModal"));
@@ -79,6 +80,9 @@ function App() {
   const [extensionActions, setExtensionActions] = useState([]);
   const [extensionGallery, setExtensionGallery] = useState(null);
   const [extensionPanel, setExtensionPanel] = useState(null);
+  const [extensionPrompt, setExtensionPrompt] = useState(null);
+  // Bumped when an extension theme is applied or removed.
+  const [themeRevision, setThemeRevision] = useState(0);
   const [installedExtensions, setInstalledExtensions] = useState([]);
   const [extensionErrors, setExtensionErrors] = useState([]);
   const [calendarView, setCalendarView] = useState('month');
@@ -251,6 +255,8 @@ function App() {
 
   useEffect(() => {
     if (!currentSettings.appBackground || currentSettings.autoAccentFromBackground === false) return;
+    // An extension theme's accent wins over the one derived from the background.
+    if (document.documentElement.dataset.caltempThemeTokens?.split(' ').includes('accent')) return;
     const fac = new FastAverageColor();
     fac.getColorAsync(resolveBackgroundImageUrl(currentSettings.appBackground), { crossOrigin: 'anonymous' })
       .then(color => {
@@ -260,7 +266,7 @@ function App() {
         document.documentElement.style.setProperty('--caltemp-accent', '#3b82f6');
     });
     return () => fac.destroy();
-  }, [currentSettings.appBackground, currentSettings.autoAccentFromBackground]);
+  }, [currentSettings.appBackground, currentSettings.autoAccentFromBackground, themeRevision]);
 
   // Helper for notifications
   const notify = React.useCallback(async (title, body, type = 'info', meta = {}) => {
@@ -357,6 +363,13 @@ function App() {
       };
     },
     openGallery: (gallery) => setExtensionGallery(gallery),
+    // One prompt at a time: a new one cancels the previous.
+    prompt: (options) => new Promise((resolve) => {
+      setExtensionPrompt((current) => {
+        current?.resolve(null);
+        return { ...options, resolve };
+      });
+    }),
     showPanel: (panel) => {
       setExtensionPanel(panel);
       return {
@@ -376,6 +389,10 @@ function App() {
     if (!manager) return;
     setExtensionGallery(null);
     setExtensionPanel(null);
+    setExtensionPrompt((current) => {
+      current?.resolve(null);
+      return null;
+    });
     await manager.initialize();
     manager.emit('app:ready', { version: settingsRef.current?.version });
   }, []);
@@ -388,6 +405,7 @@ function App() {
       onChange: syncExtensionState,
     });
     extensionManagerRef.current = manager;
+    const offThemeChange = manager.on('theme:changed', () => setThemeRevision((revision) => revision + 1));
     let cancelled = false;
 
     queueMicrotask(() => {
@@ -405,6 +423,7 @@ function App() {
 
     return () => {
       cancelled = true;
+      offThemeChange();
       if (extensionManagerRef.current === manager) extensionManagerRef.current = null;
       manager.dispose().catch((error) => console.error('Failed to stop extensions:', error));
     };
@@ -1068,7 +1087,7 @@ function App() {
     <div
       onContextMenu={handleContextMenu}
       className={`h-screen w-screen flex flex-col text-white overflow-hidden border border-white/10 transition-colors duration-500 ${
-        isTransparent ? 'bg-transparent' : 'bg-[#0a0a0a]'
+        isTransparent ? 'bg-transparent' : 'bg-[color:var(--caltemp-background,#0a0a0a)]'
       }`}
     >
       {/* App Background Image Container */}
@@ -1087,7 +1106,7 @@ function App() {
 
         <div className="flex-1 flex overflow-hidden">
         {/* Minimal Sidebar */}
-        <div className="w-16 bg-[#1e1e1e]/50 backdrop-blur-md border-r border-white/5 flex flex-col items-center py-6 gap-6 z-20">
+        <div className="w-16 bg-[color:var(--caltemp-panel,#1e1e1e)]/50 backdrop-blur-md border-r border-white/5 flex flex-col items-center py-6 gap-6 z-20">
           <button
             onClick={() => playBubbleSound()}
             className="p-3 rounded-xl text-blue-200 hover:text-white transition-all shadow-lg"
@@ -1133,7 +1152,7 @@ function App() {
         {/* Main Content & Dexter Flex Container */}
           {/* Main Content Area: Switch between Calendar and Dexter */}
           <div className={`flex-1 flex overflow-hidden relative ${
-            isTransparent ? 'bg-transparent' : 'bg-gradient-to-br from-[#0a0a0a] to-[#121212]'
+            isTransparent ? 'bg-transparent' : 'bg-gradient-to-br from-[color:var(--caltemp-background,#0a0a0a)] to-[color:var(--caltemp-background,#121212)]'
           }`}>
             
             {isDexterOpen ? (
@@ -1169,7 +1188,7 @@ function App() {
                   navigationRequest={calendarNavigation}
                 />
                 {showImportPrompt && (
-                  <div className="absolute bottom-5 right-5 z-20 flex max-w-sm items-start gap-3 rounded-2xl border border-white/10 bg-[#1b1b1b]/95 p-4 shadow-2xl backdrop-blur-md">
+                  <div className="absolute bottom-5 right-5 z-20 flex max-w-sm items-start gap-3 rounded-2xl border border-white/10 bg-[color:var(--caltemp-panel,#1b1b1b)]/95 p-4 shadow-2xl backdrop-blur-md">
                     <div className="rounded-xl bg-blue-500/15 p-2 text-blue-300">
                       <CalendarArrowDown size={20} />
                     </div>
@@ -1206,7 +1225,7 @@ function App() {
                   </div>
                 )}
                 {showLocalAiOffer && (
-                  <div className="absolute bottom-5 right-5 z-20 flex max-w-sm items-start gap-3 rounded-2xl border border-white/10 bg-[#1b1b1b]/95 p-4 shadow-2xl">
+                  <div className="absolute bottom-5 right-5 z-20 flex max-w-sm items-start gap-3 rounded-2xl border border-white/10 bg-[color:var(--caltemp-panel,#1b1b1b)]/95 p-4 shadow-2xl">
                     <div className="rounded-xl bg-purple-500/15 p-2 text-purple-200">
                       <HardDrive size={20} />
                     </div>
@@ -1348,6 +1367,22 @@ function App() {
         onClose={() => setIsCommandPaletteOpen(false)}
         actions={commandActions}
       />
+
+      {extensionPrompt && (
+        <Suspense fallback={null}>
+          <ExtensionPromptModal
+            prompt={extensionPrompt}
+            onSubmit={(value) => {
+              extensionPrompt.resolve(value);
+              setExtensionPrompt(null);
+            }}
+            onCancel={() => {
+              extensionPrompt.resolve(null);
+              setExtensionPrompt(null);
+            }}
+          />
+        </Suspense>
+      )}
 
       {extensionPanel && (
         <Suspense fallback={null}>

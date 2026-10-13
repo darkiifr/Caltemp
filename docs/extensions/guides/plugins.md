@@ -44,6 +44,15 @@ ctx.commands.register({
 });
 ```
 
+## Saisie
+
+`ctx.ui.prompt()` demande une ligne de texte à l’utilisateur :
+
+```js
+const title = await ctx.ui.prompt({ title: 'Nouvelle tâche', placeholder: 'Titre…' });
+if (title) await ctx.calendar.create({ title, date: new Date().toISOString() });
+```
+
 ## Panneaux
 
 `ctx.ui.showPanel()` ouvre une fenêtre interne construite à partir de blocs. Les boutons rappellent le code du plugin.
@@ -117,4 +126,4 @@ Les événements de Caltemp (`calendar:*`, `app:*`, …) ne peuvent pas être é
 
 Le code du plugin s’exécute dans un Web Worker dédié : pas de `window`, `document`, `fetch`, `XMLHttpRequest`, `WebSocket`, `indexedDB` ni APIs Tauri. Tout passe par `ctx`, et chaque appel est vérifié par Caltemp. Limite connue : un `import()` dynamique d’une URL distante reste techniquement possible dans le worker ; c’est interdit pour les plugins publiés dans le registry officiel.
 
-Consultez `examples/extensions/week-summary/index.js` pour un plugin complet.
+Consultez les [exemples](../../../examples/extensions/README.md) pour des plugins complets.

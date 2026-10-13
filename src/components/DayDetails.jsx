@@ -101,7 +101,7 @@ function DayDetails({ date, events, holiday, showNamedays, onEditEvent, onDelete
     };
 
     return (
-        <div className="w-80 bg-[#1e1e1e]/30 backdrop-blur-xl border-l border-white/5 flex flex-col h-full animate-in slide-in-from-right duration-300 relative">
+        <div className="w-80 bg-[color:var(--caltemp-panel,#1e1e1e)]/30 backdrop-blur-xl border-l border-white/5 flex flex-col h-full animate-in slide-in-from-right duration-300 relative">
             <div className="p-6 border-b border-white/5">
                 <h3 className="text-xl font-bold text-white capitalize leading-tight">
                     {formattedDate}
@@ -170,7 +170,7 @@ function DayDetails({ date, events, holiday, showNamedays, onEditEvent, onDelete
             {contextMenu && (
                 <div
                     style={{ top: contextMenu.y, left: contextMenu.x }}
-                    className="fixed z-50 bg-[#252525] border border-white/10 rounded-lg shadow-xl py-1 min-w-[160px] animate-in fade-in zoom-in-95 duration-100"
+                    className="fixed z-50 bg-[color:var(--caltemp-panel-strong,#252525)] border border-white/10 rounded-lg shadow-xl py-1 min-w-[160px] animate-in fade-in zoom-in-95 duration-100"
                 >
                     <button
                         onClick={() => onEditEvent && onEditEvent(contextMenu.event)}

@@ -190,3 +190,33 @@ describe('ExtensionManager', () => {
     expect(openGallery).toHaveBeenCalledWith(gallery);
   });
 });
+
+describe('ExtensionManager theme tokens', () => {
+  it('lists the active theme tokens on the root element and announces removal', async () => {
+    const element = { style: { setProperty: vi.fn(), removeProperty: vi.fn() }, dataset: {} };
+    const records = [{
+      enabled: true,
+      manifest: {
+        id: 'com.caltemp.theme.tokens',
+        name: 'Tokens',
+        version: '1.0.0',
+        theme: { colors: { accent: '#88c0d0', panel: '#3b4252' }, variables: { '--other': '1px' } },
+      },
+    }];
+    const manager = new ExtensionManager({ rootElement: element, store: { listInstalled: async () => records } });
+    const changes = [];
+    manager.on('theme:changed', ({ id }) => changes.push(id));
+
+    await manager.initialize();
+
+    expect(element.dataset).toEqual({ caltempTheme: 'com.caltemp.theme.tokens', caltempThemeTokens: 'accent panel' });
+    expect(element.style.setProperty).toHaveBeenCalledWith('--caltemp-accent', '#88c0d0');
+
+    records[0].enabled = false;
+    await manager.initialize();
+
+    expect(element.dataset).toEqual({});
+    expect(element.style.removeProperty).toHaveBeenCalledWith('--caltemp-panel');
+    expect(changes).toEqual(['com.caltemp.theme.tokens', null]);
+  });
+});

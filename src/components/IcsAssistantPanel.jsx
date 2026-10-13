@@ -136,7 +136,7 @@ export default function IcsAssistantPanel({
         type="button"
         onClick={() => setIsOpen(true)}
         disabled={disabled}
-        className="group flex w-full max-w-lg items-center justify-between gap-5 rounded-lg border border-white/10 bg-[#191b1d] px-5 py-4 text-left transition-colors hover:border-white/20 hover:bg-[#202326] disabled:cursor-not-allowed disabled:opacity-50"
+        className="group flex w-full max-w-lg items-center justify-between gap-5 rounded-lg border border-white/10 bg-[color:var(--caltemp-panel,#191b1d)] px-5 py-4 text-left transition-colors hover:border-white/20 hover:bg-[color:var(--caltemp-panel-strong,#202326)] disabled:cursor-not-allowed disabled:opacity-50"
         aria-label="Ajouter une URL de calendrier"
         initial={shouldReduceMotion ? false : { opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
@@ -172,7 +172,7 @@ export default function IcsAssistantPanel({
               role="dialog"
               aria-modal="true"
               aria-label="Ajouter une URL de calendrier"
-              className="relative max-h-[92vh] w-full max-w-4xl overflow-hidden rounded-lg border border-white/12 bg-[#17191b] shadow-2xl shadow-black/45"
+              className="relative max-h-[92vh] w-full max-w-4xl overflow-hidden rounded-lg border border-white/12 bg-[color:var(--caltemp-panel,#17191b)] shadow-2xl shadow-black/45"
               initial={shouldReduceMotion ? false : { opacity: 0, y: 14, scale: 0.99 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={shouldReduceMotion ? undefined : { opacity: 0, y: 10, scale: 0.99 }}

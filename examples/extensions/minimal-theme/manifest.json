@@ -1,15 +1,14 @@
 {
   "id": "com.caltemp.examples.minimal-theme",
   "name": "Thème minimal cyan",
-  "version": "2.0.0",
-  "description": "Exemple minimal de thème : quelques couleurs, rien d'autre.",
+  "version": "2.1.0",
+  "description": "Le plus petit thème possible : une seule couleur d'accent.",
   "author": "Caltemp",
   "license": "MIT",
   "repository": "https://github.com/darkiifr/Caltemp",
   "theme": {
     "colors": {
-      "accent": "#67e8f9",
-      "panel": "rgba(8, 47, 73, 0.55)"
+      "accent": "#0891b2"
     }
   }
 }

@@ -235,7 +235,7 @@ export default function EventModal({ isOpen, onClose, onSave, onDelete, initialD
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-in fade-in duration-200">
-            <div className="max-h-[92vh] w-full max-w-lg overflow-y-auto custom-scrollbar bg-[#1e1e1e] border border-white/10 rounded-2xl shadow-2xl p-6 scale-100 animate-in zoom-in-95 duration-200">
+            <div className="max-h-[92vh] w-full max-w-lg overflow-y-auto custom-scrollbar bg-[color:var(--caltemp-panel,#1e1e1e)] border border-white/10 rounded-2xl shadow-2xl p-6 scale-100 animate-in zoom-in-95 duration-200">
                 <div className="flex justify-between items-start gap-4 mb-6">
                     <div>
                         <h2 className="text-xl font-semibold text-white">

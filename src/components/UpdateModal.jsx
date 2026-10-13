@@ -6,7 +6,7 @@ export default function UpdateModal({ isOpen, onClose, onInstall, updateInfo, cu
 
     return (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-            <div className="bg-[#1e1e1e] w-[500px] rounded-2xl shadow-2xl border border-white/10 flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="bg-[color:var(--caltemp-panel,#1e1e1e)] w-[500px] rounded-2xl shadow-2xl border border-white/10 flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
                 {/* Header */}
                 <div className="p-6 border-b border-white/5 flex items-start justify-between">
                     <div className="flex gap-4">
@@ -36,7 +36,7 @@ export default function UpdateModal({ isOpen, onClose, onInstall, updateInfo, cu
                 </div>
 
                 {/* Footer */}
-                <div className="p-6 bg-[#252525] border-t border-white/5 flex justify-end gap-3">
+                <div className="p-6 bg-[color:var(--caltemp-panel-strong,#252525)] border-t border-white/5 flex justify-end gap-3">
                     <button 
                         onClick={onClose}
                         className="px-4 py-2 rounded-xl text-sm font-medium text-gray-400 hover:text-white hover:bg-white/5 transition-colors"

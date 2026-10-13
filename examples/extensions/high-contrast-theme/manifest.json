@@ -1,0 +1,18 @@
+{
+  "id": "com.caltemp.examples.high-contrast-theme",
+  "name": "Contraste élevé",
+  "version": "1.0.0",
+  "description": "Noir pur, texte blanc et accent bleu vif pour une lisibilité maximale.",
+  "author": "Caltemp",
+  "license": "MIT",
+  "repository": "https://github.com/darkiifr/Caltemp",
+  "theme": {
+    "colors": {
+      "accent": "#1f7aff",
+      "text": "#ffffff",
+      "background": "#000000",
+      "panel": "#000000",
+      "panel-strong": "#141414"
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "id": "com.caltemp.examples.nord-theme",
+  "name": "Nord",
+  "version": "1.0.0",
+  "description": "Palette arctique bleu-gris, douce pour les yeux, inspirée de Nord.",
+  "author": "Caltemp",
+  "license": "MIT",
+  "repository": "https://github.com/darkiifr/Caltemp",
+  "theme": {
+    "colors": {
+      "accent": "#5e81ac",
+      "text": "#eceff4",
+      "background": "#2e3440",
+      "panel": "#3b4252",
+      "panel-strong": "#434c5e"
+    }
+  }
+}

@@ -73,7 +73,7 @@ export default function ContextMenu({
       ref={menuRef}
       role="menu"
       aria-label="Menu Caltemp"
-      className="fixed z-50 w-[232px] overflow-hidden rounded-xl border border-white/10 bg-[#181818]/95 py-1.5 text-sm text-white shadow-2xl shadow-black/50 backdrop-blur-xl"
+      className="fixed z-50 w-[232px] overflow-hidden rounded-xl border border-white/10 bg-[color:var(--caltemp-panel,#181818)]/95 py-1.5 text-sm text-white shadow-2xl shadow-black/50 backdrop-blur-xl"
       style={{ top: position.top, left: position.left }}
     >
       <button

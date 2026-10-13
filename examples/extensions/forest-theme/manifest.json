@@ -1,0 +1,18 @@
+{
+  "id": "com.caltemp.examples.forest-theme",
+  "name": "Forêt",
+  "version": "1.0.0",
+  "description": "Verts profonds et accent menthe.",
+  "author": "Caltemp",
+  "license": "MIT",
+  "repository": "https://github.com/darkiifr/Caltemp",
+  "theme": {
+    "colors": {
+      "accent": "#16a34a",
+      "text": "#ecfdf5",
+      "background": "#0b1510",
+      "panel": "#12201a",
+      "panel-strong": "#1a2e24"
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "id": "com.caltemp.examples.sunset-theme",
+  "name": "Coucher de soleil",
+  "version": "1.0.0",
+  "description": "Orange chaud sur fonds prune, pour les fins de journée.",
+  "author": "Caltemp",
+  "license": "MIT",
+  "repository": "https://github.com/darkiifr/Caltemp",
+  "theme": {
+    "colors": {
+      "accent": "#ea580c",
+      "text": "#fff7ed",
+      "background": "#1c0f14",
+      "panel": "#2a1520",
+      "panel-strong": "#3a1d2a"
+    }
+  }
+}

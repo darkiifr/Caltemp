@@ -39,7 +39,7 @@ export default function CustomSelect({ value, options, onChange, ariaLabel, clas
       </button>
 
       {isOpen && (
-        <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-[90] max-h-64 overflow-y-auto rounded-xl border border-white/10 bg-[#151515] p-1 shadow-2xl custom-scrollbar">
+        <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-[90] max-h-64 overflow-y-auto rounded-xl border border-white/10 bg-[color:var(--caltemp-panel,#151515)] p-1 shadow-2xl custom-scrollbar">
           {options.map(option => (
             <button
               key={option.value}

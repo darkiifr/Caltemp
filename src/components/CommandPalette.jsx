@@ -21,7 +21,7 @@ export default function CommandPalette({ isOpen, onClose, actions = [] }) {
 
   return (
     <div className="fixed inset-0 z-[80] bg-black/50 backdrop-blur-sm flex items-start justify-center pt-24">
-      <div className="w-full max-w-xl rounded-2xl border border-white/10 bg-[#161616]/95 shadow-2xl overflow-hidden">
+      <div className="w-full max-w-xl rounded-2xl border border-white/10 bg-[color:var(--caltemp-panel,#161616)]/95 shadow-2xl overflow-hidden">
         <div className="flex items-center gap-3 px-4 py-3 border-b border-white/10">
           <Search size={18} className="text-white/40" />
           <input

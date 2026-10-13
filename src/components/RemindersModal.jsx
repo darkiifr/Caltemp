@@ -49,7 +49,7 @@ export default function RemindersModal({ isOpen, onClose, events, onDeleteEvent,
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200 p-4">
-            <div className="bg-[#1e1e1e] w-full max-w-3xl h-full max-h-[80vh] rounded-2xl shadow-2xl border border-white/10 flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="bg-[color:var(--caltemp-panel,#1e1e1e)] w-full max-w-3xl h-full max-h-[80vh] rounded-2xl shadow-2xl border border-white/10 flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
                 
                 {/* Header */}
                 <div className="h-16 border-b border-white/5 flex items-center justify-between px-8 shrink-0 bg-gradient-to-r from-blue-600/10 to-purple-600/10">

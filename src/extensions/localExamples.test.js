@@ -2,22 +2,25 @@ import { describe, expect, it } from 'vitest';
 import { getBundledExtensionExamples } from './localExamples';
 
 describe('getBundledExtensionExamples', () => {
-  it('exposes bundled examples, including single-file plugins', () => {
+  it('bundles every example folder, plugins first then themes', () => {
     const examples = getBundledExtensionExamples();
+    const types = examples.map((example) => example.manifest.type);
 
-    expect(examples.map((example) => example.manifest.id)).toEqual([
-      'com.caltemp.examples.week-summary',
-      'com.caltemp.examples.hello',
-      'com.caltemp.examples.youtube-theme',
-      'com.caltemp.examples.minimal-theme',
-      'com.caltemp.examples.french-football-gallery',
-    ]);
+    expect(types.indexOf('theme')).toBeGreaterThan(0);
+    expect(types.slice(types.indexOf('theme')).every((type) => type === 'theme')).toBe(true);
     expect(examples.every((example) => example.folderPath.startsWith('examples/extensions/'))).toBe(true);
-    const weekSummary = examples[0];
+    expect(examples.every((example) => example.source === 'bundled-example')).toBe(true);
+  });
+
+  it('reads single-file plugins from their header and folder plugins from manifest.json', () => {
+    const examples = getBundledExtensionExamples();
+    const weekSummary = examples.find((example) => example.manifest.id === 'com.caltemp.examples.week-summary');
+    const gallery = examples.find((example) => example.manifest.id === 'com.caltemp.examples.french-football-gallery');
+
     expect(weekSummary.manifestText).toBeUndefined();
     expect(weekSummary.manifest.permissions).toEqual(['calendar:read', 'notifications:send']);
     expect(weekSummary.manifest.settings.map((setting) => setting.key)).toEqual(['days', 'showCategories']);
-    expect(examples.find((example) => example.manifest.id.endsWith('minimal-theme')).manifest.theme.variables)
-      .toEqual({ '--caltemp-accent': '#67e8f9', '--caltemp-panel': 'rgba(8, 47, 73, 0.55)' });
+    expect(gallery.manifestText).toContain('"Galerie Bleus"');
+    expect(gallery.entryCode).toContain('ctx.commands.register');
   });
 });
