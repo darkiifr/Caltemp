@@ -2,22 +2,22 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://caltemp.app/schemas/caltemp-extension-manifest.schema.json",
   "title": "Caltemp Extension Manifest",
+  "description": "SDK 2.0. Only id, name and version are required; a manifest with a theme block is a theme, anything else a plugin.",
   "type": "object",
-  "required": ["id", "name", "type", "version", "sdkVersion", "compatibility"],
+  "required": ["id", "name", "version"],
   "properties": {
     "id": {
       "type": "string",
       "pattern": "^[a-z0-9][a-z0-9.-]+[a-z0-9]$"
     },
     "name": { "type": "string", "minLength": 1 },
-    "type": { "enum": ["plugin", "theme"] },
+    "type": { "enum": ["plugin", "theme"], "description": "Inferred when omitted." },
     "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+" },
-    "sdkVersion": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+" },
+    "sdkVersion": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+", "default": "2.0.0" },
     "compatibility": {
       "type": "object",
-      "required": ["caltemp"],
       "properties": {
-        "caltemp": { "type": "string" }
+        "caltemp": { "type": "string", "default": ">=6.0.0" }
       }
     },
     "description": { "type": "string" },
@@ -34,16 +34,60 @@
           "calendar:write",
           "settings:read",
           "notifications:send",
-          "network:github",
-          "storage:extension"
+          "network",
+          "storage:extension",
+          "network:github"
         ]
       },
+      "uniqueItems": true,
+      "description": "storage:extension and network:github are accepted for SDK 1.x manifests and grant nothing."
+    },
+    "hosts": {
+      "type": "array",
+      "description": "Domains reachable through ctx.http.fetch (HTTPS). Requires the network permission. '*.example.com' matches subdomains.",
+      "items": { "type": "string", "pattern": "^(\\*\\.)?[a-z0-9-]+(\\.[a-z0-9-]+)+$" },
       "uniqueItems": true
     },
-    "entry": { "type": "string" },
+    "entry": { "type": "string", "default": "index.js", "pattern": "^[A-Za-z0-9_.-]+\\.m?js$" },
+    "settings": {
+      "type": "array",
+      "description": "User settings rendered in Settings › Extensions and read with ctx.config.get(key).",
+      "items": {
+        "type": "object",
+        "required": ["key"],
+        "properties": {
+          "key": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]*$" },
+          "type": { "enum": ["string", "number", "boolean", "select"], "default": "string" },
+          "label": { "type": "string" },
+          "description": { "type": "string" },
+          "default": {},
+          "min": { "type": "number" },
+          "max": { "type": "number" },
+          "options": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                { "type": "string" },
+                {
+                  "type": "object",
+                  "required": ["value"],
+                  "properties": { "value": { "type": "string" }, "label": { "type": "string" } }
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
     "theme": {
       "type": "object",
       "properties": {
+        "colors": {
+          "type": "object",
+          "description": "Shorthand: { \"accent\": \"#f00\" } sets --caltemp-accent.",
+          "propertyNames": { "pattern": "^[a-z][a-z0-9-]*$" },
+          "additionalProperties": { "type": "string" }
+        },
         "variables": {
           "type": "object",
           "propertyNames": { "pattern": "^--" },
@@ -55,15 +99,5 @@
       "type": "array",
       "items": { "type": "string" }
     }
-  },
-  "allOf": [
-    {
-      "if": { "properties": { "type": { "const": "plugin" } } },
-      "then": { "required": ["entry"] }
-    },
-    {
-      "if": { "properties": { "type": { "const": "theme" } } },
-      "then": { "required": ["theme"] }
-    }
-  ]
+  }
 }

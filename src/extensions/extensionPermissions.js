@@ -1,4 +1,4 @@
-import { EXTENSION_PERMISSIONS } from './constants.js';
+import { EXTENSION_PERMISSIONS, LEGACY_PERMISSIONS } from './constants.js';
 
 export function isKnownPermission(permission) {
   return EXTENSION_PERMISSIONS.includes(permission);
@@ -22,11 +22,13 @@ export function normalizePermissions(permissions = []) {
   }
 
   const uniquePermissions = [...new Set(permissions)];
-  const unknownPermission = uniquePermissions.find((permission) => !isKnownPermission(permission));
+  const unknownPermission = uniquePermissions.find(
+    (permission) => !isKnownPermission(permission) && !LEGACY_PERMISSIONS.includes(permission),
+  );
 
   if (unknownPermission) {
     throw new Error(`Permission non supportée: ${unknownPermission}`);
   }
 
-  return uniquePermissions;
+  return uniquePermissions.filter(isKnownPermission);
 }

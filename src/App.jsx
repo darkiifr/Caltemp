@@ -5,7 +5,6 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { type } from '@tauri-apps/plugin-os';
-import { relaunch } from '@tauri-apps/plugin-process';
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import CalendarView from "./components/CalendarView";
 import Titlebar from "./components/Titlebar";
@@ -16,7 +15,7 @@ import "./App.css";
 import { loadEvents, saveEventsLatest, loadSettings, saveSettings } from "./services/fileManager";
 import { ExtensionManager, ExtensionStore } from "./extensions";
 import { clearDiscordPresence, updateDiscordPresence } from "./services/discordRpc";
-import { consumeRuntimeSession, saveRuntimeSession } from "./services/runtimeSession";
+import { consumeRuntimeSession } from "./services/runtimeSession";
 
 import { playBubbleSound, playRingtone, playNotificationSound, configureSounds, resumeAudioContext } from "./utils/sound";
 import { formatEventDate, normalizeEvent, normalizeEvents, normalizeSettings } from "./domain/events";
@@ -37,6 +36,7 @@ import { getCompatibleWindowEffect } from "./utils/windowEffects";
 const SettingsModal = lazy(() => import("./components/SettingsModal"));
 const Dexter = lazy(() => import("./components/Dexter"));
 const ExtensionGalleryModal = lazy(() => import("./components/ExtensionGalleryModal"));
+const ExtensionPanelModal = lazy(() => import("./components/ExtensionPanelModal"));
 const CalendarImportWizard = lazy(() => import("./components/CalendarImportWizard"));
 const EventModal = lazy(() => import("./components/EventModal"));
 const RemindersModal = lazy(() => import("./components/RemindersModal"));
@@ -78,6 +78,7 @@ function App() {
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [extensionActions, setExtensionActions] = useState([]);
   const [extensionGallery, setExtensionGallery] = useState(null);
+  const [extensionPanel, setExtensionPanel] = useState(null);
   const [installedExtensions, setInstalledExtensions] = useState([]);
   const [extensionErrors, setExtensionErrors] = useState([]);
   const [calendarView, setCalendarView] = useState('month');
@@ -304,91 +305,127 @@ function App() {
     notifyRef.current = notify;
   }, [notify]);
 
-  const refreshExtensions = useCallback(async () => {
-    const store = new ExtensionStore();
-    await Promise.resolve();
-    setExtensionActions([]);
-    setExtensionGallery(null);
-    const manager = new ExtensionManager({
-      store,
-      host: {
-        getEvents: () => eventsRef.current,
-        getSettings: () => settingsRef.current,
-        createEvent: async (event) => {
-          const eventToSave = normalizeEvent({
-            id: event.id || Date.now().toString(),
-            date: event.date || new Date().toISOString(),
-            title: event.title || 'Sans titre',
-            ...event,
-          }, settingsRef.current);
-          const updatedEvents = [...eventsRef.current, eventToSave];
-          await commitEvents(updatedEvents);
-          manager.emit('calendar:event-created', { event: eventToSave });
-          return eventToSave;
-        },
-        updateEvent: async (event) => {
-          const eventToSave = normalizeEvent(event, settingsRef.current);
-          const updatedEvents = eventsRef.current.map((item) =>
-            item.id === eventToSave.id ? eventToSave : item
-          );
-          await commitEvents(updatedEvents);
-          manager.emit('calendar:event-updated', { event: eventToSave });
-          return eventToSave;
-        },
-        deleteEvent: async (eventId) => {
-          const updatedEvents = eventsRef.current.filter((item) => item.id !== eventId);
-          await commitEvents(updatedEvents);
-          manager.emit('calendar:event-deleted', { eventId });
-        },
-        notify,
-        registerAction: (action) => {
-          if (!action || typeof action.id !== 'string' || typeof action.label !== 'string' || typeof action.run !== 'function') {
-            return () => {};
-          }
+  // One extension manager for the app's lifetime. Its host only reads refs,
+  // so settings or notification changes never restart plugins.
+  const extensionHost = useMemo(() => ({
+    getEvents: () => eventsRef.current,
+    getSettings: () => settingsRef.current,
+    createEvent: async (event) => {
+      const eventToSave = normalizeEvent({
+        ...event,
+        id: event.id || Date.now().toString(),
+        date: event.date || new Date().toISOString(),
+        title: event.title || 'Sans titre',
+      }, settingsRef.current);
+      await commitEvents([...eventsRef.current, eventToSave]);
+      extensionManagerRef.current?.emit('calendar:event-created', { event: eventToSave });
+      return eventToSave;
+    },
+    updateEvent: async (event) => {
+      const current = eventsRef.current.find((item) => item.id === event.id);
+      const eventToSave = normalizeEvent({ ...current, ...event }, settingsRef.current);
+      await commitEvents(eventsRef.current.map((item) => (item.id === eventToSave.id ? eventToSave : item)));
+      extensionManagerRef.current?.emit('calendar:event-updated', { event: eventToSave });
+      return eventToSave;
+    },
+    deleteEvent: async (eventId) => {
+      await commitEvents(eventsRef.current.filter((item) => item.id !== eventId));
+      extensionManagerRef.current?.emit('calendar:event-deleted', { eventId });
+    },
+    notify: (...args) => notifyRef.current?.(...args),
+    toast: (title, body, type) => setToastNotification({ id: Date.now().toString(), title, body, type }),
+    fetch: (url, init) => tauriFetch(url, init),
+    registerAction: (action) => {
+      const extensionAction = {
+        id: `extension-${action.id}`,
+        label: action.label,
+        run: () => Promise.resolve(action.run()).catch((error) => {
+          setToastNotification({
+            id: Date.now().toString(),
+            title: action.extensionName || 'Extension',
+            body: error?.message || 'La commande a échoué.',
+            type: 'error',
+          });
+        }),
+      };
+      setExtensionActions((current) => [
+        ...current.filter((item) => item.id !== extensionAction.id),
+        extensionAction,
+      ]);
+      return () => {
+        setExtensionActions((current) => current.filter((item) => item.id !== extensionAction.id));
+      };
+    },
+    openGallery: (gallery) => setExtensionGallery(gallery),
+    showPanel: (panel) => {
+      setExtensionPanel(panel);
+      return {
+        update: (next) => setExtensionPanel((current) => (current?.id === next.id ? next : current)),
+        close: () => setExtensionPanel((current) => (current?.id === panel.id ? null : current)),
+      };
+    },
+  }), [commitEvents]);
 
-          const extensionAction = {
-            id: `extension-${action.id}`,
-            label: action.label,
-            run: action.run,
-          };
-
-          setExtensionActions((current) => [
-            ...current.filter((item) => item.id !== extensionAction.id),
-            extensionAction,
-          ]);
-
-          return () => {
-            setExtensionActions((current) => current.filter((item) => item.id !== extensionAction.id));
-          };
-        },
-        openGallery: (gallery) => setExtensionGallery(gallery),
-      },
-    });
-
-    extensionManagerRef.current = manager;
-    await manager.initialize();
+  const syncExtensionState = useCallback((manager) => {
     setInstalledExtensions(manager.getInstalled());
     setExtensionErrors(manager.getErrors());
+  }, []);
+
+  const refreshExtensions = useCallback(async () => {
+    const manager = extensionManagerRef.current;
+    if (!manager) return;
+    setExtensionGallery(null);
+    setExtensionPanel(null);
+    await manager.initialize();
     manager.emit('app:ready', { version: settingsRef.current?.version });
-  }, [commitEvents, notify]);
+  }, []);
 
   useEffect(() => {
     if (!isLoaded) return;
+    const manager = new ExtensionManager({
+      store: new ExtensionStore(),
+      host: extensionHost,
+      onChange: syncExtensionState,
+    });
+    extensionManagerRef.current = manager;
     let cancelled = false;
 
     queueMicrotask(() => {
       if (cancelled) return;
-      refreshExtensions().catch((error) => {
-        if (cancelled) return;
-        console.error('Failed to initialize extensions:', error);
-        setExtensionErrors([{ extensionId: 'runtime', message: error.message }]);
-      });
+      manager.initialize()
+        .then(() => {
+          if (!cancelled) manager.emit('app:ready', { version: settingsRef.current?.version });
+        })
+        .catch((error) => {
+          if (cancelled) return;
+          console.error('Failed to initialize extensions:', error);
+          setExtensionErrors([{ extensionId: 'runtime', message: error.message }]);
+        });
     });
 
     return () => {
       cancelled = true;
+      if (extensionManagerRef.current === manager) extensionManagerRef.current = null;
+      manager.dispose().catch((error) => console.error('Failed to stop extensions:', error));
     };
-  }, [isLoaded, refreshExtensions]);
+  }, [isLoaded, extensionHost, syncExtensionState]);
+
+  // What the Extensions settings tab can do; every action applies live.
+  const extensionControls = useMemo(() => {
+    const withManager = (fn) => async (...args) => {
+      const manager = extensionManagerRef.current;
+      if (!manager) throw new Error('Les extensions ne sont pas encore chargées.');
+      return fn(manager, ...args);
+    };
+    return {
+      install: withManager((manager, prepared, options) => manager.install(prepared, options)),
+      remove: withManager((manager, id) => manager.remove(id)),
+      setEnabled: withManager((manager, id, enabled) => manager.setEnabled(id, enabled)),
+      reload: withManager((manager, id) => manager.reload(id)),
+      saveConfig: withManager((manager, id, values) => manager.saveConfig(id, values)),
+      refresh: refreshExtensions,
+    };
+  }, [refreshExtensions]);
 
   useEffect(() => {
     if (!isLoaded) return;
@@ -425,6 +462,13 @@ function App() {
           reminderItems: notification.items,
           count: notification.items?.length || 1,
         });
+        for (const item of notification.items || []) {
+          extensionManagerRef.current?.emit('reminder:triggered', {
+            event: item.event,
+            occurrence: item.occurrence.toISOString(),
+            phase: item.phase,
+          });
+        }
       }
 
       const marked = applyNotificationMarks(currentEvents, notifications);
@@ -1008,14 +1052,6 @@ function App() {
     ...extensionActions,
   ], [settings, handleAddEvent, handleSaveEvent, extensionActions, handleExportPng, handleExportPdf, openImportWizard, openIcsSubscriptions]);
 
-  const handleRestartApp = useCallback(async () => {
-    await saveRuntimeSession({
-      settingsTab: 'extensions',
-      calendarView,
-      selectedDate: selectedDate instanceof Date ? selectedDate.toISOString() : null,
-    });
-    await relaunch();
-  }, [calendarView, selectedDate]);
   
   const appBgStyle = isBackgroundActive ? {
     backgroundImage: `url("${resolveBackgroundImageUrl(currentSettings.appBackground)}")`,
@@ -1238,8 +1274,7 @@ function App() {
         onOpenImportWizard={openImportWizard}
         installedExtensions={installedExtensions}
         extensionErrors={extensionErrors}
-        onRefreshExtensions={refreshExtensions}
-        onRequestRestart={handleRestartApp}
+        extensionControls={extensionControls}
         onSyncIcsSource={syncIcsSourceById}
         onAddAndSyncIcsSource={addAndSyncIcsSource}
         onToggleIcsSource={toggleIcsSource}
@@ -1313,6 +1348,18 @@ function App() {
         onClose={() => setIsCommandPaletteOpen(false)}
         actions={commandActions}
       />
+
+      {extensionPanel && (
+        <Suspense fallback={null}>
+          <ExtensionPanelModal
+            panel={extensionPanel}
+            onClose={() => {
+              extensionPanel.onClose?.();
+              setExtensionPanel(null);
+            }}
+          />
+        </Suspense>
+      )}
 
       {extensionGallery && (
         <Suspense fallback={null}>

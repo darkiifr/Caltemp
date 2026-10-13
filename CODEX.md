@@ -58,19 +58,20 @@ Use targeted commands during development, then run the full relevant set before 
 ## Extensions conventions
 
 - SDK runtime lives in `src/extensions/`.
-- Public SDK version is `1.0.0`.
-- Plugins are safe ESM bundles with `activate(ctx)` and optional `deactivate(ctx)`.
-- Plugins must use the controlled SDK context; direct Tauri API access is not part of the v1 contract.
-- Permissions must be declared in manifests and enforced before sensitive SDK calls.
+- Public SDK version is `2.0.0`.
+- Plugins are single-file ESM modules with `activate(ctx)` (optional `deactivate(ctx)`) and a `/** @caltemp … */` header or a `manifest.json`.
+- Each plugin runs in its own Web Worker and reaches the app only through `ctx`; direct Tauri API access is not part of the contract.
+- Permissions are declared in the header/manifest and enforced host-side in `src/extensions/sandbox/hostApi.js`.
+- Caltemp disposes a plugin's commands, panels and subscriptions; lifecycle changes apply without restart.
 - Themes are declarative and apply CSS variables.
-- Validate examples with `npm run extensions:validate`.
+- Validate examples with `npm run extensions:validate` (or pass a plugin file/folder).
 
 ## Discord Rich Presence
 
 - Client/application ID: `1516083174931824720`.
 - Presence must remain privacy-safe by default.
 - Do not include event titles, descriptions, notes, exact dates, or personal user data.
-- Discord RPC is first-party app integration, not a plugin API in v1.
+- Discord RPC is first-party app integration, not a plugin API.
 
 ## Documentation
 

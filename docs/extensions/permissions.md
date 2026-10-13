@@ -1,12 +1,17 @@
 # Permissions
 
-Les permissions sont déclarées dans `manifest.json`.
+Déclarées dans l’en-tête `@caltemp` ou `manifest.json`, affichées avant l’installation et vérifiées par Caltemp à chaque appel.
 
-- `calendar:read`: lire les événements.
-- `calendar:write`: créer, modifier ou supprimer des événements.
-- `settings:read`: lire les réglages.
-- `notifications:send`: envoyer une notification Caltemp.
-- `network:github`: réservé aux futures intégrations GitHub.
-- `storage:extension`: utiliser le stockage privé de l’extension.
+| Permission | Donne accès à |
+| --- | --- |
+| `calendar:read` | `ctx.calendar.list/occurrences/get`, détails des événements `calendar:*` et `reminder:triggered` |
+| `calendar:write` | `ctx.calendar.create/update/delete` |
+| `settings:read` | `ctx.settings.read()` (préférences d’affichage seulement) |
+| `notifications:send` | `ctx.notify()` |
+| `network` | `ctx.http.fetch()` vers les domaines listés dans `hosts` |
 
-Un appel sans permission échoue avec une erreur explicite.
+Sans permission : commandes, panneaux, `ctx.ui.toast`, galerie, stockage privé, réglages du plugin, événements personnalisés.
+
+Un appel sans la permission requise échoue avec une erreur explicite.
+
+`storage:extension` et `network:github` (SDK 1.x) sont acceptées mais n’accordent rien : le stockage privé est désormais toujours disponible.

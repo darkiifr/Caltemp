@@ -1,11 +1,10 @@
 # Déploiement
 
-Les extensions sont déployées via GitHub:
+Les extensions sont déployées via GitHub :
 
-- tag semver ou release GitHub;
-- `manifest.json` accessible publiquement en HTTPS;
-- bundle plugin en asset de release;
-- changelog attaché à la release;
-- entrée ajoutée au registry officiel Caltemp.
+- tag semver ou release GitHub ;
+- le fichier du plugin (ou `manifest.json` pour un thème) en asset de release, accessible en HTTPS ;
+- changelog attaché à la release ;
+- entrée ajoutée au registry officiel Caltemp (voir [publication](./publishing.md)).
 
-Après publication, l’application détecte la version disponible au prochain rafraîchissement marketplace.
+Après publication, l’application détecte la version disponible au prochain rafraîchissement de la marketplace.

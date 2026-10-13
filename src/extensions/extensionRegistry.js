@@ -27,20 +27,33 @@ function requireUrl(value, field) {
   return value;
 }
 
+function optionalUrl(value, field) {
+  return value === undefined || value === null || value === '' ? '' : requireUrl(value, field);
+}
+
 export function normalizeRegistryEntry(entry) {
   if (!entry || typeof entry !== 'object') {
     throw new Error('Entrée registry invalide.');
   }
 
+  // A single-file plugin only needs `assetUrl`; a theme only `manifestUrl`.
+  const manifestUrl = optionalUrl(entry.manifestUrl, 'manifestUrl');
+  const assetUrl = optionalUrl(entry.assetUrl, 'assetUrl');
+  if (!manifestUrl && !assetUrl) {
+    throw new Error('Entrée registry invalide: manifestUrl ou assetUrl est requis.');
+  }
+
   return {
     id: String(entry.id || '').trim(),
+    name: String(entry.name || '').trim(),
+    description: String(entry.description || '').trim(),
     latestVersion: String(entry.latestVersion || '').trim(),
-    manifestUrl: requireUrl(entry.manifestUrl, 'manifestUrl'),
-    assetUrl: requireUrl(entry.assetUrl, 'assetUrl'),
+    manifestUrl,
+    assetUrl,
     sha256: String(entry.sha256 || '').trim(),
     repository: requireUrl(entry.repository, 'repository'),
     publishedAt: String(entry.publishedAt || '').trim(),
-    changelogUrl: requireUrl(entry.changelogUrl, 'changelogUrl'),
+    changelogUrl: optionalUrl(entry.changelogUrl, 'changelogUrl'),
     source: 'github',
   };
 }

@@ -5,7 +5,7 @@ This file provides guidance to agents working with code in this repository.
 ## Project snapshot
 - Desktop calendar app built with **React + Vite** frontend and **Tauri v2** native shell.
 - Frontend source is in `src/`; native Tauri/Rust code is in `src-tauri/`.
-- The project now includes an extensions SDK, a GitHub-backed marketplace, and Discord Rich Presence integration.
+- The project now includes a sandboxed extensions SDK, a GitHub-backed marketplace, and Discord Rich Presence integration.
 - Treat Caltemp as a **desktop application first**, not as a website. Browser-only Vite mode is useful for quick build checks, but it is not authoritative for runtime behavior.
 
 ## Setup and common commands
@@ -35,7 +35,7 @@ Run from repository root unless noted.
 - Run JS unit tests:
   - `npm test`
 
-- Validate bundled extension examples:
+- Validate bundled extension examples (or pass paths to check your own):
   - `npm run extensions:validate`
 
 - Rust-only check loop (from `src-tauri/`):
@@ -113,12 +113,14 @@ Run from repository root unless noted.
   - sound customization (stored in settings and used by `src/utils/sound.js`)
 
 ### 5) Extensions SDK and marketplace
-- SDK/runtime lives in `src/extensions/`.
-- Public SDK version is `1.0.0`.
-- Plugins are safe single-file ESM modules exposing `activate(ctx)` and optional `deactivate(ctx)`.
-- Plugins must not call Tauri APIs directly. Use the controlled SDK context and declared permissions.
-- Themes are declarative manifests applying CSS variables.
-- Marketplace UI is `src/components/MarketplacePanel.jsx`.
+- SDK/runtime lives in `src/extensions/`. Public SDK version is `2.0.0` (`constants.js`); SDK 1.x manifests and method names still work.
+- Plugins are single-file ESM modules exposing `activate(ctx)` (optional `deactivate`). Metadata comes from a `/** @caltemp … */` header (`parsePluginHeader` in `manifest.js`, read as text, never executed) or a `manifest.json`; only `id`, `name`, `version` are required, everything else has defaults.
+- Each plugin runs in its own Web Worker (`sandbox/pluginWorker.js`, network globals removed) and only talks to the app through the message protocol in `sandbox/protocol.js`. `sandbox/guest.js` builds `ctx` inside the worker; `sandbox/pluginConnection.js` is the host end; `sandbox/hostApi.js` implements every capability and is where permissions, `hosts`, payload filtering and panel sanitizing are enforced. Never trust the guest: checks belong in `hostApi.js`. Tests use `createInProcessTransport` (no isolation) through `ExtensionManager({ loadPluginModule })`.
+- `ExtensionManager` applies install/update/enable/disable/remove/reload/config changes live (no restart) and disposes a plugin's commands, panels and subscriptions itself. `App.jsx` creates one manager for the app lifetime; its `extensionHost` only reads refs.
+- Plugins must not call Tauri APIs directly. New capabilities go through `hostApi.js` with a declared permission when they touch user data or the network; calendar and settings event payloads are reduced for plugins lacking `calendar:read` / `settings:read`.
+- Per-plugin storage (`extensionStorage.js`) persists to `extensions/<id>/storage.json`; user settings declared in the manifest are stored in the index entry's `config`.
+- Themes are declarative manifests applying CSS variables (`theme.colors` shorthand or `theme.variables`).
+- Marketplace UI is `src/components/MarketplacePanel.jsx` (file install/drag-and-drop with permission preview, per-plugin settings); plugin panels render in `src/components/ExtensionPanelModal.jsx`.
 - Official registry contract is `extensions/registry.json`.
 - Developer docs are under `docs/extensions/`.
 - Manifest schema is `public/schemas/caltemp-extension-manifest.schema.json`.

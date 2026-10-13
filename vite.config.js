@@ -37,6 +37,10 @@ export default defineConfig(async () => ({
   },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
+  // Plugins run in module workers (src/extensions/sandbox/pluginWorker.js).
+  worker: {
+    format: "es",
+  },
   build: {
     chunkSizeWarningLimit: 800,
     rollupOptions: {

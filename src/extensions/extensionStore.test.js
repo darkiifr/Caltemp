@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ExtensionStore } from './extensionStore';
+import { ExtensionStore, prepareExtension, prepareExtensionFromFiles } from './extensionStore';
 
 const pluginManifest = {
   id: 'com.caltemp.tests.plugin',
@@ -133,5 +133,71 @@ describe('ExtensionStore', () => {
     const index = JSON.parse(fs.files.get('extensions/extensions.json'));
     expect(index.installed.find((item) => item.id === firstTheme.id).enabled).toBe(true);
     expect(index.installed.find((item) => item.id === secondTheme.id).enabled).toBe(false);
+  });
+
+  it('installs a single-file plugin and keeps state and settings on update', async () => {
+    const fs = createMemoryFs();
+    const store = new ExtensionStore({ fs });
+    const source = (version) => `/** @caltemp
+ * id: com.caltemp.tests.single
+ * name: Single
+ * version: ${version}
+ */
+export function activate() {}`;
+
+    await store.installPrepared(prepareExtension({ code: source('1.0.0') }));
+    await store.setEnabled('com.caltemp.tests.single', false);
+    await store.setConfig('com.caltemp.tests.single', { greeting: 'Salut' });
+    await store.installPrepared(prepareExtension({ code: source('1.1.0') }));
+
+    const [record] = await store.listInstalled();
+    expect(record.manifest).toMatchObject({ id: 'com.caltemp.tests.single', version: '1.1.0', entry: 'index.js' });
+    expect(record.entryCode).toContain('activate');
+    expect(record.enabled).toBe(false);
+    expect(record.config).toEqual({ greeting: 'Salut' });
+  });
+
+  it('persists private extension storage next to the manifest', async () => {
+    const fs = createMemoryFs({
+      [`extensions/${pluginManifest.id}/manifest.json`]: JSON.stringify(pluginManifest),
+    });
+    const store = new ExtensionStore({ fs });
+
+    expect(await store.readStorage(pluginManifest.id)).toEqual({});
+    await store.writeStorage(pluginManifest.id, { runs: 2 });
+    expect(await store.readStorage(pluginManifest.id)).toEqual({ runs: 2 });
+
+    await store.writeStorage('com.caltemp.tests.removed', { runs: 1 });
+    expect(fs.files.has('extensions/com.caltemp.tests.removed/storage.json')).toBe(false);
+  });
+});
+
+describe('prepareExtensionFromFiles', () => {
+  const header = '/** @caltemp\n * id: com.caltemp.tests.file\n * name: File\n * version: 1.0.0\n */\nexport function activate() {}';
+
+  it('accepts a lone plugin file', () => {
+    const prepared = prepareExtensionFromFiles([{ name: 'plugin.js', text: header }]);
+    expect(prepared.manifest.id).toBe('com.caltemp.tests.file');
+    expect(prepared.code).toBe(header);
+  });
+
+  it('accepts a manifest with its entry file, or a theme manifest alone', () => {
+    const prepared = prepareExtensionFromFiles([
+      { name: 'manifest.json', text: JSON.stringify(pluginManifest) },
+      { name: 'index.js', text: 'export function activate() {}' },
+    ]);
+    expect(prepared.manifest.id).toBe(pluginManifest.id);
+
+    const theme = prepareExtensionFromFiles([{ name: 'manifest.json', text: JSON.stringify(themeManifest('com.caltemp.tests.t')) }]);
+    expect(theme.manifest.type).toBe('theme');
+    expect(theme.code).toBe('');
+  });
+
+  it('explains what is missing', () => {
+    expect(() => prepareExtensionFromFiles([{ name: 'manifest.json', text: JSON.stringify(pluginManifest) }]))
+      .toThrow(/index\.js/);
+    expect(() => prepareExtensionFromFiles([{ name: 'plugin.js', text: 'export function activate() {}' }]))
+      .toThrow(/@caltemp/);
+    expect(() => prepareExtensionFromFiles([])).toThrow(/Sélectionnez/);
   });
 });

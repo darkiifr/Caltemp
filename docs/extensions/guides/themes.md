@@ -1,19 +1,32 @@
 # Guide thèmes
 
-Les thèmes Caltemp v1 sont déclaratifs. Ils modifient l’apparence via `theme.variables`, sans JavaScript.
+Un thème est un `manifest.json` sans JavaScript.
 
-## Structure
+```json
+{
+  "id": "com.example.cyan",
+  "name": "Cyan",
+  "version": "1.0.0",
+  "theme": {
+    "colors": {
+      "accent": "#67e8f9",
+      "panel": "rgba(8, 47, 73, 0.55)"
+    }
+  }
+}
+```
 
-- `manifest.json` avec `type: "theme"`.
-- `theme.variables` contient des variables CSS dont le nom commence par `--`.
-- Le thème est appliqué immédiatement quand il est activé depuis la marketplace.
+- `theme.colors` est un raccourci : `accent` devient la variable CSS `--caltemp-accent`.
+- `theme.variables` accepte n’importe quelle variable CSS commençant par `--` ; les deux peuvent être combinés.
+- `type` est déduit de la présence de `theme`.
+- Un seul thème est actif à la fois ; il s’applique et se retire immédiatement.
 
 ## Bonnes pratiques
 
 - Gardez un contraste lisible sur les fonds sombres.
 - Préférez quelques variables cohérentes à une palette trop large.
-- Ne dépendez pas de classes internes Tailwind: elles peuvent changer.
+- Ne dépendez pas de classes internes Tailwind : elles peuvent changer.
 
-## Exemple
+## Exemples
 
-`examples/extensions/youtube-theme` montre un thème déclaratif rouge, noir et blanc inspiré de YouTube.
+`examples/extensions/minimal-theme` et `examples/extensions/youtube-theme`.

@@ -56,8 +56,7 @@ export default function SettingsModal({
     initialActiveTab = 'general',
     installedExtensions = [],
     extensionErrors = [],
-    onRefreshExtensions,
-    onRequestRestart,
+    extensionControls,
     onSyncIcsSource,
     onAddAndSyncIcsSource,
     onToggleIcsSource,
@@ -1922,8 +1921,7 @@ export default function SettingsModal({
                                 <MarketplacePanel
                                     installedExtensions={installedExtensions}
                                     extensionErrors={extensionErrors}
-                                    onRefreshExtensions={onRefreshExtensions}
-                                    onRequestRestart={onRequestRestart}
+                                    extensionControls={extensionControls}
                                 />
                             )}
                         </div>
